@@ -3,6 +3,7 @@ package com.HyperLocalSystem.app.common.exception;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -53,6 +54,14 @@ public class GlobalExceptionHandler {
         log.warn("Data integrity violation on {}: {}", request.getRequestURI(), ex.getMostSpecificCause().getMessage());
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ApiError.of(409, "CONFLICT", "The request conflicts with existing data", request.getRequestURI()));
+    }
+
+    /** Two requests changed the same order/payment at once (@Version); the loser can simply retry. */
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<ApiError> handleConcurrentUpdate(OptimisticLockingFailureException ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiError.of(409, "CONCURRENT_UPDATE", "This was changed at the same time by someone else. Please retry.",
+                        request.getRequestURI()));
     }
 
     @ExceptionHandler(Exception.class)

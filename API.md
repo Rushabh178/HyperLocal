@@ -4,6 +4,8 @@ Base URL: `http://localhost:8080/api/v1`
 
 **Status:** ✅ = working now · 🚧 = stub that returns `501 NOT_IMPLEMENTED` until its logic is written (the method in the service class has a TODO describing it).
 
+Concurrent edits of the same order or payment return `409 CONCURRENT_UPDATE`; just retry.
+
 All errors share one JSON shape:
 
 ```json
@@ -202,10 +204,14 @@ A new store is `verificationStatus: PENDING` until ops approves it, and cannot o
 | PUT | `/me/password` | `currentPassword, newPassword` | ✅ |
 | PUT | `/me/store-status` | `{open}`; approved stores only | ✅ |
 | GET | `/store-qr` | Kirana only; signed payload `HLQR1.<merchantId>.<exp>.<sig>`, valid 15 min — show it as a QR and refresh before `expiresAt` | ✅ |
-| GET | `/broadcasts` | | 🚧 |
-| POST | `/broadcasts/{id}/claim` ("Items in Hand") | | 🚧 |
-| GET | `/orders?status` | | 🚧 |
-| POST | `/orders/{id}/accept` `{prepMinutes}` · `/delay` · `/ready` | | 🚧 |
+| GET | `/broadcasts` | Kirana only. Open rounds this shop was pinged for: `[{broadcastId, orderId, items[{name, packSize, quantity}], payoutAmount, distanceMeters, expiresAt}]` (a handful at most, so not paged) | ✅ |
+| POST | `/broadcasts/{id}/claim` ("Items in Hand") | Kirana only. First tap wins (atomic): `{broadcastId, orderId, claimed, message}`; late or un-targeted taps get `claimed:false` | ✅ |
+| GET | `/orders?status&page&size` | paginated. Restaurants see their kitchen tickets, Kiranas the orders they claimed: `{orderId, status, items, amount, prepDeadline, riderName, riderEta}` | ✅ |
+| POST | `/orders/{id}/accept` `{prepMinutes 1-90}` | restaurant only; `NEW → ACCEPTED`, sets `prepDeadline` | ✅ |
+| POST | `/orders/{id}/delay` `{additionalMinutes 1-60, reason?}` | restaurant only; `→ DELAYED`, pushes `prepDeadline` back and holds back the Kirana broadcast | ✅ |
+| POST | `/orders/{id}/ready` | restaurant only; `→ READY` | ✅ |
+
+Merchant order `status`: `NEW, ACCEPTED, DELAYED, READY, PICKED_UP, CANCELLED` (`PREPARING` is accepted as a filter alias of `ACCEPTED`). Illegal moves return `409 ILLEGAL_STATE_TRANSITION`; a Kirana calling a restaurant-only endpoint gets `403 RESTAURANT_ONLY` (and vice versa `403 KIRANA_ONLY`).
 | GET | `/items?page&size` | paginated (`{items, page, size, totalItems}`), by category then name | ✅ |
 | POST | `/items` | see body below → 201 | ✅ |
 | PUT | `/items/{id}` | same body as POST | ✅ |

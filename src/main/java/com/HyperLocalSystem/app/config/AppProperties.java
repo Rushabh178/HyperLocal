@@ -23,6 +23,8 @@ public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing, Payment 
             int kiranaBroadcastRadiusMeters,
             int kiranaBroadcastFanout,
             Duration kiranaClaimTimeout,
+            /** Rounds before the grocery part is marked UNFULFILLED; each round widens the radius. */
+            int kiranaBroadcastMaxRounds,
             int h3Resolution,
             BigDecimal groceryCartNudgeThreshold,
             BigDecimal batchInjectionBonus,

@@ -32,6 +32,10 @@ public final class OrderEvents {
     public record OrderStatusChangedEvent(UUID orderId, UUID customerId, OrderStatus status) {
     }
 
+    /** A Kirana tapped "Items in Hand" first: add its pickup to the rider's route (or start dispatch). */
+    public record KiranaClaimedEvent(UUID orderId, UUID merchantId) {
+    }
+
     /** The restaurant reported a kitchen delay: hold back the Kirana broadcast by {@code delay}. */
     public record KitchenDelayedEvent(UUID orderId, Duration delay) {
     }

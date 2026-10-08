@@ -1,6 +1,7 @@
 package com.HyperLocalSystem.app.order.repository;
 
 import com.HyperLocalSystem.app.order.entity.OrderStatus;
+import com.HyperLocalSystem.app.order.entity.PartStatus;
 import com.HyperLocalSystem.app.order.entity.UnifiedOrder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -21,4 +22,12 @@ public interface UnifiedOrderRepository extends JpaRepository<UnifiedOrder, UUID
     Page<UnifiedOrder> findByCustomerIdAndStatusOrderByCreatedAtDesc(UUID customerId, OrderStatus status, Pageable pageable);
 
     boolean existsByCustomerIdAndStatusIn(UUID customerId, Collection<OrderStatus> statuses);
+
+    Optional<UnifiedOrder> findByIdAndRestaurantId(UUID id, UUID restaurantId);
+
+    Page<UnifiedOrder> findByRestaurantIdAndFoodStatusInOrderByCreatedAtDesc(
+            UUID restaurantId, Collection<PartStatus> statuses, Pageable pageable);
+
+    Page<UnifiedOrder> findByKiranaIdAndGroceryStatusInOrderByCreatedAtDesc(
+            UUID kiranaId, Collection<PartStatus> statuses, Pageable pageable);
 }

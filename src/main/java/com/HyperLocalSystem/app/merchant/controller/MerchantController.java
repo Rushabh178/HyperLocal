@@ -83,9 +83,11 @@ public class MerchantController {
     // ---- orders ----
 
     @GetMapping("/orders")
-    public List<MerchantOrder> orders(@AuthenticationPrincipal Jwt jwt,
-                                      @RequestParam(required = false) MerchantOrderStatus status) {
-        return merchantService.orders(CurrentUser.id(jwt), status);
+    public PageResponse<MerchantOrder> orders(@AuthenticationPrincipal Jwt jwt,
+                                              @RequestParam(required = false) MerchantOrderStatus status,
+                                              @RequestParam(defaultValue = "0") int page,
+                                              @RequestParam(defaultValue = "20") int size) {
+        return merchantService.orders(CurrentUser.id(jwt), status, page, size);
     }
 
     @PostMapping("/orders/{orderId}/accept")
