@@ -5,7 +5,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 
@@ -62,11 +65,16 @@ class ApiShapeTest extends IntegrationTest {
         assertThat(detail).contains("\"netTotal\":167.50");
 
         // Earnings, one style: totals, a count and paged payouts; partners also get today's online minutes.
+        Instant sessionStart = Instant.now().minusSeconds(180);
+        Instant sessionEnd = Instant.now().minusSeconds(60);
         jdbc.update("insert into agent_duty_sessions (session_id, agent_id, started_at, ended_at) values (?, ?, ?, ?)",
-                UUID.randomUUID(), rider.id(), Timestamp.from(Instant.now().minusSeconds(180)), Timestamp.from(Instant.now().minusSeconds(60)));
+                UUID.randomUUID(), rider.id(), Timestamp.from(sessionStart), Timestamp.from(sessionEnd));
+        // Only today (Indian time) counts, so just after midnight part of the session is clipped.
+        Instant dayStart = LocalDate.now(ZoneId.of("Asia/Kolkata")).atStartOfDay(ZoneId.of("Asia/Kolkata")).toInstant();
+        long expectedMinutes = Math.max(0, Duration.between(sessionStart.isAfter(dayStart) ? sessionStart : dayStart, sessionEnd).toMinutes());
         String partner = get("/api/v1/agent/earnings?period=TODAY", rider.token());
         assertThat((Integer) read(partner, "$.tripCount")).isZero();
-        assertThat((Integer) read(partner, "$.onlineMinutes")).isGreaterThanOrEqualTo(2);
+        assertThat(((Integer) read(partner, "$.onlineMinutes")).longValue()).isGreaterThanOrEqualTo(expectedMinutes);
         assertThat((Integer) read(partner, "$.payouts.page")).isZero();
         assertThat(partner).contains("\"total\":0.00");
         String store = get("/api/v1/merchant/earnings?period=WEEK", restaurant.token());
