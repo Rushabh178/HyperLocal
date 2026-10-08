@@ -175,9 +175,11 @@ public class CartService {
 
     // ----------------------------------------------------------------- used by checkout
 
-    @Transactional(readOnly = true)
-    public PricedCart priceFor(UUID customerId) {
-        return price(loadCart(customerId));
+    /** Locks the cart row for the rest of the checkout transaction, then prices it. */
+    @Transactional
+    public PricedCart lockAndPrice(UUID customerId) {
+        return price(carts.lockByCustomerId(customerId)
+                .orElseThrow(() -> ApiException.badRequest("CART_EMPTY", "Your cart is empty")));
     }
 
     /** Rejects addresses outside the 2 km radius of the cart's stores. */

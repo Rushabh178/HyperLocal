@@ -115,24 +115,33 @@ Bill (`app.ops.*`): `deliveryFee` ₹25, **waived** when the cart has food or gr
 Nudge: a grocery-only cart under ₹150 gets `{groceryTotal, threshold, message, suggestedMeals}` — the 5 priciest available dishes from open restaurants near the cart's address (or the default address).
 
 ### Orders: `/customer/orders`
-| Method | Path | Status |
-|---|---|---|
-| POST | `/checkout` `{addressId, paymentMethod, upiVpa?}` + `Idempotency-Key` header | 🚧 |
-| GET | `/?status&page&size` | 🚧 |
-| GET | `/{id}` | 🚧 |
-| GET | `/{id}/timeline` (unified Kirana → Restaurant → Home line) | 🚧 |
-| GET | `/{id}/tracking` (snapshot; live updates over WebSocket) | 🚧 |
-| POST | `/{id}/cancel` `{reason}` | 🚧 |
-| POST | `/{id}/rating` | 🚧 |
+| Method | Path | Notes | Status |
+|---|---|---|---|
+| POST | `/checkout` `{addressId, paymentMethod UPI/WALLET, upiVpa?}` + optional `Idempotency-Key` header | → 201 `{orderId, status, payableAmount, payment}`. Re-validates and re-prices the cart, freezes it into an order, takes the payment, clears the cart. Same key again returns the first order. Errors: `400 CART_EMPTY`, `400 ADDRESS_NOT_SERVICEABLE`, `409 ITEM_UNAVAILABLE`, `409 STORE_CLOSED`, `409 INSUFFICIENT_WALLET_BALANCE` | ✅ |
+| GET | `/?status&page&size` | newest first | ✅ |
+| GET | `/{id}` | items, bill, address, rider, `deliveryOtp` (4 digits, shown while the order is active) | ✅ |
+| GET | `/{id}/timeline` | unified Kirana → Restaurant → Home line | ✅ |
+| GET | `/{id}/tracking` | `{orderId, status, agentLocation, etaMinutes, updatedAt}` snapshot; live updates over WebSocket | ✅ |
+| POST | `/{id}/cancel` `{reason}` | only before pickup (`409 ORDER_NOT_CANCELLABLE` / `ORDER_ALREADY_PICKED_UP`); releases the UPI hold or refunds a wallet payment to the wallet | ✅ |
+| POST | `/{id}/rating` `{deliveryRating?, restaurantRating?, kiranaRating?, comment?}` | completed orders only, once (`409 ALREADY_RATED`); updates the stores' average rating | ✅ |
+
+**Order status** (state machine; illegal moves return `409 ILLEGAL_STATE_TRANSITION`):
+`PENDING → CONFIRMED → (BATCHED →) PICKING → OUT_FOR_DELIVERY → COMPLETED`, and `CANCELLED` from anything before pickup.
+With the fake gateway (default) and wallet payments the order is `CONFIRMED` right away; with a real gateway it stays `PENDING` until the payment webhook confirms the hold.
+Each part of the order also has its own status (`foodStatus` / `groceryStatus` internally): `AWAITING_PAYMENT → NEW → ACCEPTED ⇄ DELAYED → READY → PICKED_UP` for food, `AWAITING_PAYMENT → BROADCASTING → READY → PICKED_UP` (or `UNFULFILLED`) for groceries.
+
+Deleting the account (`DELETE /customer/me`) is refused with `409 ORDER_IN_PROGRESS` while an order is active.
 
 ### Payments & wallet
-| Method | Path | Status |
-|---|---|---|
-| POST | `/payments/orders/{orderId}/upi-hold` | 🚧 |
-| GET | `/payments/orders/{orderId}` | 🚧 |
-| POST | `/payments/webhook` (public, gateway signature) | 🚧 |
-| GET | `/customer/wallet` | 🚧 |
-| GET | `/customer/wallet/transactions` | 🚧 |
+| Method | Path | Notes | Status |
+|---|---|---|---|
+| POST | `/payments/orders/{orderId}/upi-hold` | retry a failed hold | 🚧 |
+| GET | `/payments/orders/{orderId}` | `{paymentId, orderId, amount, status, upiIntentUrl, expiresAt}` | ✅ |
+| POST | `/payments/webhook` (public, gateway signature) | | 🚧 |
+| GET | `/customer/wallet` | `{balance, currency}`; balance = sum of the append-only ledger | ✅ |
+| GET | `/customer/wallet/transactions?page&size` | newest first | ✅ |
+
+Payment status: `HOLD_PENDING → HELD → CAPTURED → PARTIALLY_REFUNDED → REFUNDED`, `HOLD_PENDING/HELD → RELEASED`, `HOLD_PENDING → FAILED`.
 
 ---
 

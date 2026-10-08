@@ -6,6 +6,8 @@ import com.HyperLocalSystem.app.customer.dto.CustomerDtos.CustomerProfileRespons
 import com.HyperLocalSystem.app.customer.dto.CustomerDtos.UpdateCustomerProfileRequest;
 import com.HyperLocalSystem.app.customer.entity.Customer;
 import com.HyperLocalSystem.app.customer.repository.CustomerRepository;
+import com.HyperLocalSystem.app.order.entity.OrderStatus;
+import com.HyperLocalSystem.app.order.repository.UnifiedOrderRepository;
 import com.HyperLocalSystem.app.security.Role;
 import com.HyperLocalSystem.app.security.TokenService;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +22,7 @@ import java.util.UUID;
 public class CustomerProfileService {
 
     private final CustomerRepository customers;
+    private final UnifiedOrderRepository orders;
     private final TokenService tokenService;
 
     @Transactional(readOnly = true)
@@ -47,15 +50,21 @@ public class CustomerProfileService {
         return toResponse(customer);
     }
 
-    /** Soft delete; frees the phone number for a future sign-up and signs out every device. */
+    /**
+     * Soft delete; frees the phone number for a future sign-up and signs out every device.
+     * Refused while an order is still in flight.
+     */
     @Transactional
     public void delete(UUID customerId) {
         Customer customer = load(customerId);
+        if (orders.existsByCustomerIdAndStatusIn(customerId, OrderStatus.ACTIVE)) {
+            throw ApiException.conflict("ORDER_IN_PROGRESS", "You can delete your account once your current order is delivered or cancelled");
+        }
         customer.setAccountStatus(AccountStatus.DELETED);
         customer.setPhone(CustomerAuthService.tombstone(customerId));
         customer.setEmail(null);
         tokenService.revokeAll(customerId, Role.CUSTOMER);
-        // TODO: reject if the customer has an order in flight; anonymise addresses per data-retention policy.
+        // TODO(edge-case): anonymise addresses per the data-retention policy.
     }
 
     private Customer load(UUID customerId) {

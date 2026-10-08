@@ -7,7 +7,7 @@ import java.time.Duration;
 
 /** Typed view of the {@code app.*} settings in application.properties. */
 @ConfigurationProperties(prefix = "app")
-public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing) {
+public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing, Payment payment) {
 
     public record Jwt(String secret, String issuer, Duration accessTokenTtl, Duration refreshTokenTtl) {
     }
@@ -42,5 +42,9 @@ public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing) {
      * at {@code averageSpeedKmph}.
      */
     public record Routing(double detourFactor, double averageSpeedKmph, String osrmBaseUrl) {
+    }
+
+    /** {@code webhookSecret} verifies gateway callbacks (HMAC-SHA256); {@code holdTtl} is how long a UPI hold lasts. */
+    public record Payment(String webhookSecret, Duration holdTtl) {
     }
 }

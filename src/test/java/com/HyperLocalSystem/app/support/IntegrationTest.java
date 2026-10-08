@@ -75,6 +75,16 @@ public abstract class IntegrationTest {
         return call(HttpMethod.PUT, url, token, json, 200);
     }
 
+    /** POST with extra headers, e.g. Idempotency-Key. */
+    protected String postWithHeader(String url, String token, String json, String header, String value, int expectedStatus) throws Exception {
+        MockHttpServletRequestBuilder builder = request(HttpMethod.POST, url).contentType(MediaType.APPLICATION_JSON)
+                .header("Authorization", "Bearer " + token).header(header, value).content(json);
+        MvcResult result = mvc.perform(builder).andReturn();
+        String body = result.getResponse().getContentAsString();
+        assertThat(result.getResponse().getStatus()).as("POST " + url + " -> " + body).isEqualTo(expectedStatus);
+        return body;
+    }
+
     protected static <T> T read(String json, String path) {
         return JsonPath.read(json, path);
     }

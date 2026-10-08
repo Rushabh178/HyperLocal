@@ -8,6 +8,7 @@ import com.HyperLocalSystem.app.common.model.StopType;
 import com.HyperLocalSystem.app.customer.dto.CustomerDtos.AddressResponse;
 import com.HyperLocalSystem.app.order.entity.OrderStatus;
 import com.HyperLocalSystem.app.payment.dto.PaymentDtos.PaymentHoldResponse;
+import com.HyperLocalSystem.app.payment.entity.PaymentMethod;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -23,8 +24,6 @@ public final class OrderDtos {
 
     private OrderDtos() {
     }
-
-    public enum PaymentMethod { UPI, WALLET }
 
     /** Converts the current cart into one order. Send an {@code Idempotency-Key} header to make retries safe. */
     public record CheckoutRequest(
@@ -68,7 +67,7 @@ public final class OrderDtos {
     }
 
     /** Snapshot for the first paint; live updates arrive on the WebSocket user queue /user/queue/tracking. */
-    public record TrackingResponse(UUID orderId, GeoPoint agentLocation, Integer etaMinutes, Instant updatedAt) {
+    public record TrackingResponse(UUID orderId, OrderStatus status, GeoPoint agentLocation, Integer etaMinutes, Instant updatedAt) {
     }
 
     public record CancelOrderRequest(@NotBlank @Size(max = 250) String reason) {
