@@ -411,6 +411,7 @@ There is no admin sign-up. The first admin is created on startup from `ADMIN_EMA
 | Merchant | `/user/queue/merchant-events` | `NEW_ORDER`, `ORDER_CANCELLED`, `BROADCAST_OFFER`, `BROADCAST_TAKEN`, `RIDER_ARRIVING`, `ORDER_PICKED_UP` |
 
 - Rider → server: `SEND /app/agent/location` with the same body as `POST /agent/me/location`; errors come back on `/user/queue/errors`.
+- Scaling note: the broker is Spring's in-memory one, so a user only gets messages from the instance they are connected to. Before running more than one backend instance, switch to a relay broker (RabbitMQ STOMP) or Redis pub/sub (`TODO(scale)` in `WebSocketConfig`). Push notifications are not affected.
 
 ### Envelope
 Every message on every queue has the same shape; switch on `type`, read `data`:

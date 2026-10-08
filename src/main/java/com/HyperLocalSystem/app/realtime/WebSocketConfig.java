@@ -44,6 +44,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
+        // TODO(scale): the simple in-memory broker only reaches users connected to THIS instance. With more
+        // than one backend instance, switch to a relay broker (registry.enableStompBrokerRelay(...) against
+        // RabbitMQ's STOMP plugin) or fan out over Redis pub/sub, so /user/queue/... destinations work across servers.
         registry.enableSimpleBroker("/queue");
         registry.setApplicationDestinationPrefixes("/app");
         registry.setUserDestinationPrefix("/user");
