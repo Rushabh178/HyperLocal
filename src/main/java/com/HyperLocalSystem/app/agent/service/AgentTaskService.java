@@ -6,7 +6,6 @@ import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.DeliveryHistoryItem;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.EarningsPeriod;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.EarningsSummary;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.KiranaQrScanRequest;
-import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.MarkDeficientRequest;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.PayoutItem;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.RejectOfferRequest;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.TaskOffer;
@@ -162,75 +161,84 @@ public class AgentTaskService {
     }
 
     /**
-     * Blueprint step 4: the rider scans the Kirana's in-store QR → the Kirana is paid, the items go into
-     * the COLD chamber and the stop is done.
+     * Pickup step 2 (Kirana only, optional): mark what the shop doesn't have. Only between Arrived and
+     * the QR scan; the money moves at the scan.
      */
     @Transactional
-    public ActiveRouteResponse scanKiranaQr(UUID agentId, UUID stopId, KiranaQrScanRequest request) {
-        RouteStop stop = currentStop(agentId, stopId);
+    public ActiveRouteResponse markMissing(UUID agentId, UUID stopId, List<UUID> itemIds) {
+        RouteStop stop = arrivedPickup(agentId, stopId);
         requireType(stop, StopType.KIRANA);
-        if (!storeQrService.verify(request.qrPayload()).equals(stop.getMerchantId())) {
-            throw ApiException.badRequest("QR_WRONG_STORE", "This QR belongs to a different store");
+        for (UUID itemId : itemIds) {
+            OrderItem item = orderItems.findById(itemId)
+                    .filter(i -> i.getOrderId().equals(stop.getOrderId()) && i.getType() == ItemType.GROCERY)
+                    .orElseThrow(() -> ApiException.notFound("Item"));
+            item.setDeficient(true);
         }
-        UnifiedOrder order = loadOrder(stop.getOrderId());
-        order.moveGroceryTo(PartStatus.PICKED_UP);
-        complete(stop);
-        BigDecimal payout = orderItems.findByOrderIdAndTypeOrderByCreatedAt(order.getId(), ItemType.GROCERY).stream()
-                .filter(item -> !item.isDeficient()).map(OrderItem::getLineTotal).reduce(BigDecimal.ZERO, BigDecimal::add);
-        paymentService.captureForMerchant(order.getId(), stop.getMerchantId(), payout);
-        afterPickup(order);
+        events.publishEvent(new StopChangedEvent(stop.getId(), stop.getOrderId(), StopChange.ITEMS_UPDATED));
         return routeResponse(agentId);
     }
 
     /**
-     * Point-of-collection discrepancy: the item's amount goes back to the customer's wallet. If nothing
-     * is left at this Kirana the stop is dropped; a grocery-only order with nothing left is cancelled.
+     * Pickup step 3, the same at every store: the store's QR completes the stop.
+     * Kirana: the shop is settled for the available items only and the missing ones are refunded to
+     * the customer's wallet (nothing available → the stop is skipped, and a grocery-only order is
+     * cancelled). Restaurant: the food is picked up and the restaurant is settled. Blueprint step 4.
      */
     @Transactional
-    public ActiveRouteResponse markItemDeficient(UUID agentId, UUID stopId, UUID itemId, MarkDeficientRequest request) {
-        RouteStop stop = currentStop(agentId, stopId);
-        requireType(stop, StopType.KIRANA);
-        OrderItem item = orderItems.findById(itemId)
-                .filter(i -> i.getOrderId().equals(stop.getOrderId()) && i.getType() == ItemType.GROCERY)
-                .orElseThrow(() -> ApiException.notFound("Item"));
-        if (item.isDeficient()) {
-            throw ApiException.conflict("ALREADY_MARKED", item.getName() + " is already marked as missing");
+    public ActiveRouteResponse scanQr(UUID agentId, UUID stopId, KiranaQrScanRequest request) {
+        RouteStop stop = arrivedPickup(agentId, stopId);
+        if (request == null || request.qrPayload() == null || request.qrPayload().isBlank()) {
+            throw ApiException.badRequest("QR_REQUIRED", "Scan the store's QR to finish the pickup");
         }
-        item.setDeficient(true);
-        events.publishEvent(new StopChangedEvent(stop.getId(), stop.getOrderId(), StopChange.ITEMS_UPDATED));
-        paymentService.partialRefundToWallet(stop.getOrderId(), item.getLineTotal(), "Missing item: " + item.getName(),
-                "refund:item:" + item.getId());
+        if (!storeQrService.verify(request.qrPayload()).equals(stop.getMerchantId())) {
+            throw ApiException.badRequest("QR_WRONG_STORE", "This QR belongs to a different store");
+        }
+        UnifiedOrder order = loadOrder(stop.getOrderId());
+        if (stop.getType() == StopType.RESTAURANT) {
+            order.moveFoodTo(PartStatus.PICKED_UP);
+            complete(stop);
+            paymentService.captureForMerchant(order.getId(), stop.getMerchantId(), order.getFoodSubtotal());
+            afterPickup(order);
+            return routeResponse(agentId);
+        }
 
-        boolean nothingLeft = orderItems.findByOrderIdAndTypeOrderByCreatedAt(stop.getOrderId(), ItemType.GROCERY).stream()
-                .allMatch(OrderItem::isDeficient);
-        if (nothingLeft) {
-            UnifiedOrder order = loadOrder(stop.getOrderId());
-            stop.setState(StopState.SKIPPED);
-            events.publishEvent(new StopChangedEvent(stop.getId(), stop.getOrderId(), StopChange.SKIPPED));
-            order.moveGroceryTo(PartStatus.UNFULFILLED);
-            if (!order.hasFood()) {
-                RoutePlanner.skipRemaining(stops.findByOrderIdOrderBySequence(order.getId()));
-                lifecycle.cancel(order, "None of the items were available at the store");
-                stops.flush();
-                dispatch.completeRouteIfDone(agentId);
-            } else {
-                afterPickup(order);
-            }
+        List<OrderItem> groceries = orderItems.findByOrderIdAndTypeOrderByCreatedAt(order.getId(), ItemType.GROCERY);
+        BigDecimal available = sum(groceries.stream().filter(item -> !item.isDeficient()).toList());
+        BigDecimal missing = sum(groceries.stream().filter(OrderItem::isDeficient).toList());
+        if (available.signum() == 0) {
+            nothingAvailable(agentId, stop, order, missing);
+            return routeResponse(agentId);
         }
+        order.moveGroceryTo(PartStatus.PICKED_UP);
+        complete(stop);
+        paymentService.captureForMerchant(order.getId(), stop.getMerchantId(), available);
+        if (missing.signum() > 0) {
+            paymentService.partialRefundToWallet(order.getId(), missing, "Items missing at " + stop.getName(),
+                    "refund:missing:" + stop.getId());
+        }
+        afterPickup(order);
         return routeResponse(agentId);
     }
 
-    /** Restaurant hand-over: hot items into the HOT chamber; the restaurant is paid. */
-    @Transactional
-    public ActiveRouteResponse confirmPickup(UUID agentId, UUID stopId) {
-        RouteStop stop = currentStop(agentId, stopId);
-        requireType(stop, StopType.RESTAURANT);
-        UnifiedOrder order = loadOrder(stop.getOrderId());
-        order.moveFoodTo(PartStatus.PICKED_UP);
-        complete(stop);
-        paymentService.captureForMerchant(order.getId(), stop.getMerchantId(), order.getFoodSubtotal());
-        afterPickup(order);
-        return routeResponse(agentId);
+    /** Every item was missing: drop the stop; cancel a grocery-only order, refund the groceries of a combined one. */
+    private void nothingAvailable(UUID agentId, RouteStop stop, UnifiedOrder order, BigDecimal missing) {
+        stop.setState(StopState.SKIPPED);
+        events.publishEvent(new StopChangedEvent(stop.getId(), stop.getOrderId(), StopChange.SKIPPED));
+        order.moveGroceryTo(PartStatus.UNFULFILLED);
+        if (!order.hasFood()) {
+            RoutePlanner.skipRemaining(stops.findByOrderIdOrderBySequence(order.getId()));
+            lifecycle.cancel(order, "None of the items were available at the store");
+            stops.flush();
+            dispatch.completeRouteIfDone(agentId);
+        } else {
+            paymentService.partialRefundToWallet(order.getId(), missing, "Items missing at " + stop.getName(),
+                    "refund:missing:" + stop.getId());
+            afterPickup(order);
+        }
+    }
+
+    private static BigDecimal sum(List<OrderItem> items) {
+        return items.stream().map(OrderItem::getLineTotal).reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
     /**
@@ -328,6 +336,22 @@ public class AgentTaskService {
     private RiderRoute activeRoute(UUID agentId) {
         return routes.findByAgentIdAndStatus(agentId, RiderRoute.Status.ACTIVE)
                 .orElseThrow(() -> ApiException.notFound("Active route"));
+    }
+
+    /** A pickup stop the rider is standing at: not finished yet, next in sequence, Arrived tapped. */
+    private RouteStop arrivedPickup(UUID agentId, UUID stopId) {
+        RouteStop stop = stops.findByIdAndAgentId(stopId, agentId).orElseThrow(() -> ApiException.notFound("Stop"));
+        if (stop.isDone()) {
+            throw ApiException.conflict("STOP_ALREADY_COMPLETED", "This pickup is already done");
+        }
+        if (!stop.isPickup()) {
+            throw ApiException.badRequest("WRONG_STOP_TYPE", "This action is for a store pickup");
+        }
+        RouteStop current = currentStop(agentId, stopId);
+        if (current.getState() != StopState.ARRIVED) {
+            throw ApiException.conflict("NOT_ARRIVED", "Tap Arrived when you reach the store");
+        }
+        return current;
     }
 
     /** The stop must be the rider's and the next one in sequence. */

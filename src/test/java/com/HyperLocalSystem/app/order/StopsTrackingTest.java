@@ -42,15 +42,19 @@ class StopsTrackingTest extends IntegrationTest {
         String tracking = get("/api/v1/customer/orders/" + orderId + "/tracking", customer.token());
         assertThat((List<String>) read(tracking, "$.stops[*].status")).containsExactly("ARRIVED", "PENDING");
 
-        // Bread is missing: STOPS_UPDATED carries it with its refund and the bill after refunds.
+        // Bread is missing: STOPS_UPDATED lists it with its refund amount; the refund itself happens at the scan.
         String breadLine = read(get("/api/v1/agent/route", rider.token()), "$.stops[0].items[?(@.name == 'Brown Bread')].itemId")
                 .toString().replaceAll("[\\[\\]\"]", "");
         post("/api/v1/agent/route/stops/" + kiranaStop + "/items/" + breadLine + "/deficient", rider.token(), null);
         String missing = messages.waitFor(customer.id(), "/queue/tracking", "STOPS_UPDATED", "$.data.missingItems[0].name", "Brown Bread");
         assertThat((Double) read(missing, "$.data.missingItems[0].refundAmount")).isEqualTo(45.0);
+
+        String qr = read(get("/api/v1/merchant/store-qr", kirana.token()), "$.qrPayload");
+        post("/api/v1/agent/route/stops/" + kiranaStop + "/scan-qr", rider.token(), "{\"qrPayload\":\"%s\"}".formatted(qr));
+        String refunded = messages.waitFor(customer.id(), "/queue/tracking", "STOPS_UPDATED", "$.data.stops[0].status", "PICKED_UP");
         // 120 milk + 45 bread + 10 convenience fee (no delivery fee above ₹150) = 175; bread goes back.
-        assertThat((Double) read(missing, "$.data.bill.total")).isEqualTo(175.0);
-        assertThat((Double) read(missing, "$.data.bill.refunds")).isEqualTo(45.0);
-        assertThat((Double) read(missing, "$.data.bill.netTotal")).isEqualTo(130.0);
+        assertThat((Double) read(refunded, "$.data.bill.total")).isEqualTo(175.0);
+        assertThat((Double) read(refunded, "$.data.bill.refunds")).isEqualTo(45.0);
+        assertThat((Double) read(refunded, "$.data.bill.netTotal")).isEqualTo(130.0);
     }
 }

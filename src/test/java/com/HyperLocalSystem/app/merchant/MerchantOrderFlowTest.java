@@ -47,11 +47,11 @@ class MerchantOrderFlowTest extends IntegrationTest {
         assertThat(Instant.parse(read(delayed, "$.prepDeadline"))).isEqualTo(deadline.plusSeconds(600));
         assertThat((String) read(post("/api/v1/merchant/orders/" + orderId + "/ready", restaurant.token(), null), "$.status"))
                 .isEqualTo("READY");
-        // Illegal moves are rejected by the state machine; Kiranas can't touch kitchen tickets.
+        // Illegal moves are rejected by the state machine; a Kirana can only mark its own claimed orders ready.
         String illegal = call(HttpMethod.POST, "/api/v1/merchant/orders/" + orderId + "/accept", restaurant.token(),
                 "{\"prepMinutes\":5}", 409);
         assertThat((String) read(illegal, "$.code")).isEqualTo("ILLEGAL_STATE_TRANSITION");
-        call(HttpMethod.POST, "/api/v1/merchant/orders/" + orderId + "/ready", kirana1.token(), null, 403);
+        call(HttpMethod.POST, "/api/v1/merchant/orders/" + orderId + "/ready", kirana1.token(), null, 404);
 
         // ---- groceries: confirming the order broadcast them to both Kiranas; both tap at once, exactly one wins.
         await().atMost(Duration.ofSeconds(10)).until(() -> !((List<?>) read(get("/api/v1/merchant/broadcasts", kirana2.token()), "$")).isEmpty());
@@ -74,7 +74,10 @@ class MerchantOrderFlowTest extends IntegrationTest {
 
         Session winner = won1 ? kirana1 : kirana2;
         Session loser = won1 ? kirana2 : kirana1;
-        assertThat((String) read(get("/api/v1/merchant/orders", winner.token()), "$.items[0].status")).isEqualTo("READY");
+        // Claimed = accepted by the Kirana; it marks the bag ready with the same endpoint as restaurants.
+        assertThat((String) read(get("/api/v1/merchant/orders", winner.token()), "$.items[0].status")).isEqualTo("ACCEPTED");
+        assertThat((String) read(post("/api/v1/merchant/orders/" + orderId + "/ready", winner.token(), null), "$.status"))
+                .isEqualTo("READY");
         assertThat((Integer) read(get("/api/v1/merchant/orders", loser.token()), "$.totalItems")).isZero();
         assertThat((List<?>) read(get("/api/v1/merchant/broadcasts", loser.token()), "$")).isEmpty();
     }

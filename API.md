@@ -159,7 +159,7 @@ Nudge: a grocery-only cart under ₹150 gets `{groceryTotal, threshold, message,
 **Order status** (state machine; illegal moves return `409 ILLEGAL_STATE_TRANSITION`):
 `PENDING → CONFIRMED → (BATCHED →) PICKING → OUT_FOR_DELIVERY → COMPLETED`, and `CANCELLED` from anything before pickup.
 With the fake gateway (default) and wallet payments the order is `CONFIRMED` right away; with a real gateway it stays `PENDING` until the payment webhook confirms the hold.
-Each part of the order also has its own status (`foodStatus` / `groceryStatus` internally): `AWAITING_PAYMENT → NEW → ACCEPTED ⇄ DELAYED → READY → PICKED_UP` for food, `AWAITING_PAYMENT → BROADCASTING → READY → PICKED_UP` (or `UNFULFILLED`) for groceries.
+Each part of the order also has its own status (`foodStatus` / `groceryStatus` internally): `AWAITING_PAYMENT → NEW → ACCEPTED ⇄ DELAYED → READY → PICKED_UP` for food, `AWAITING_PAYMENT → BROADCASTING → CLAIMED → READY → PICKED_UP` (or `UNFULFILLED` when no Kirana claims it or nothing is available) for groceries.
 
 Deleting the account (`DELETE /customer/me`) is refused with `409 ORDER_IN_PROGRESS` while an order is active.
 
@@ -205,16 +205,24 @@ Approved, online partners only. Offers reach the nearest free rider (H3 cells + 
 | POST | `/offers/{id}/accept` | first accept wins; `409 OFFER_NO_LONGER_AVAILABLE` / `409 RIDER_BUSY`. Rider → `ACTIVE`, order → `PICKING`; returns the locked route | ✅ |
 | POST | `/offers/{id}/reject` `{reason?}` | 204; the order goes to the next rider straight away | ✅ |
 | GET | `/route` | `{routeId, locked:true, stops[{stopId, sequence, type, name, address, location, orderIds, items, state, eta}], remainingDistanceMeters, estimatedCompletionAt}`; `404` when no active route | ✅ |
-| POST | `/route/stops/{stopId}/arrived` | | ✅ |
-| POST | `/route/stops/{stopId}/kirana-qr` `{qrPayload}` | Kirana stop: the shop's QR must match (`400 QR_WRONG_STORE` / `QR_INVALID` / `QR_EXPIRED`); captures the payment and records the Kirana's payout | ✅ |
-| POST | `/route/stops/{stopId}/items/{itemId}/deficient` `{reason?}` | `itemId` = the stop item's id; refunds that line to the customer's wallet; if nothing is left the stop is skipped (and a grocery-only order is cancelled) | ✅ |
-| POST | `/route/stops/{stopId}/picked-up` | restaurant stop; records the restaurant's payout | ✅ |
+| POST | `/route/stops/{stopId}/arrived` | pickup step 1 (also used at the customer); tells the store `RIDER_ARRIVING` | ✅ |
+| POST | `/route/stops/{stopId}/deficient` `{itemIds:[…], reason?}` | pickup step 2, **Kirana only, optional**: mark missing items (stop item ids). Only after Arrived (`409 NOT_ARRIVED`) and before the scan (`409 STOP_ALREADY_COMPLETED`) | ✅ |
+| POST | `/route/stops/{stopId}/scan-qr` `{qrPayload}` | pickup step 3 at **every** store: the store's QR must match (`400 QR_WRONG_STORE` / `QR_INVALID` / `QR_EXPIRED` / `QR_REQUIRED`), needs Arrived (`409 NOT_ARRIVED`). Completes the stop. Kirana: the shop is settled for the available items only and the missing ones are refunded to the customer's wallet (nothing available → stop skipped; a grocery-only order is cancelled). Restaurant: food picked up, restaurant settled | ✅ |
+| POST | `/route/stops/{stopId}/kirana-qr` · `/route/stops/{stopId}/picked-up` | aliases of `scan-qr` (same `{qrPayload}` body) | ✅ |
+| POST | `/route/stops/{stopId}/items/{itemId}/deficient` | alias of `deficient` for one item | ✅ |
 | POST | `/orders/{orderId}/deliver` `{deliveryOtp}` | 4-digit code from the customer; `400 DELIVERY_OTP_INVALID`. Completes the order, books earnings, frees the rider when the route is empty | ✅ |
 | POST | `/route/injections/{id}/ack` | 204 | ✅ |
 | GET | `/deliveries?page&size` | `{orderId, batched, stops, earnings, completedAt}` | ✅ |
 | GET | `/earnings?period=TODAY/WEEK/MONTH` | Indian time; base ₹30 per order + ₹10 per extra pickup + batching incentives | ✅ |
 | GET | `/earnings/payouts?page&size` | | ✅ |
 
+Pickup sequence at every store: **Arrived → mark missing items (Kirana only, optional) → Scan QR**.
+```
+POST /api/v1/agent/route/stops/e2d4…/arrived
+POST /api/v1/agent/route/stops/e2d4…/deficient   {"itemIds": ["41b8…"], "reason": "Out of stock"}
+POST /api/v1/agent/route/stops/e2d4…/scan-qr     {"qrPayload": "HLQR1.0c5e….1791477000.Zm9v…"}
+→ 200 the route, with stop e2d4… "state": "COMPLETED"
+```
 Stops must be worked in order (Linear Route Locking): acting on any stop but the current one returns `409 STOP_LOCKED`. One order's stops always run Kirana → Restaurant → Customer; a Kirana that claims after the rider accepted is inserted before the restaurant.
 
 ---
@@ -241,15 +249,15 @@ A new store is `verificationStatus: PENDING` until ops approves it, and cannot o
 | GET | `/me` | profile incl. `verificationStatus`, `rejectionReason`, `open` | ✅ |
 | PUT | `/me/password` | `currentPassword, newPassword` | ✅ |
 | PUT | `/me/store-status` | `{open}`; approved stores only | ✅ |
-| GET | `/store-qr` | Kirana only; signed payload `HLQR1.<merchantId>.<exp>.<sig>`, valid 15 min — show it as a QR and refresh before `expiresAt` | ✅ |
+| GET | `/store-qr` | **every store** (Kirana and restaurant); signed payload `HLQR1.<merchantId>.<exp>.<sig>`, valid 15 min — show it as a QR and refresh before `expiresAt`. Response `{"qrPayload": "HLQR1.…", "expiresAt": "…"}` | ✅ |
 | GET | `/broadcasts` | Kirana only. Open rounds this shop was pinged for: `[{broadcastId, orderId, items[{name, packSize, quantity}], payoutAmount, distanceMeters, expiresAt}]` (a handful at most, so not paged) | ✅ |
 | POST | `/broadcasts/{id}/claim` ("Items in Hand") | Kirana only. First tap wins (atomic): `{broadcastId, orderId, claimed, message}`; late or un-targeted taps get `claimed:false` | ✅ |
 | GET | `/orders?status&page&size` | paginated. Restaurants see their kitchen tickets, Kiranas the orders they claimed: `{orderId, status, items, amount, prepDeadline, riderName, riderEta}` | ✅ |
 | POST | `/orders/{id}/accept` `{prepMinutes 1-90}` | restaurant only; `NEW → ACCEPTED`, sets `prepDeadline` | ✅ |
 | POST | `/orders/{id}/delay` `{additionalMinutes 1-60, reason?}` | restaurant only; `→ DELAYED`, pushes `prepDeadline` back and holds back the Kirana broadcast | ✅ |
-| POST | `/orders/{id}/ready` | restaurant only; `→ READY` | ✅ |
+| POST | `/orders/{id}/ready` | restaurant: food `ACCEPTED/DELAYED → READY`; Kirana: groceries `CLAIMED → READY` (its own claimed orders only, else `404`) | ✅ |
 
-Merchant order `status`: `NEW, ACCEPTED, DELAYED, READY, PICKED_UP, CANCELLED` (`PREPARING` is accepted as a filter alias of `ACCEPTED`). Illegal moves return `409 ILLEGAL_STATE_TRANSITION`; a Kirana calling a restaurant-only endpoint gets `403 RESTAURANT_ONLY` (and vice versa `403 KIRANA_ONLY`).
+Merchant order `status`: `NEW, ACCEPTED, DELAYED, READY, PICKED_UP, CANCELLED` (`PREPARING` is accepted as a filter alias of `ACCEPTED`). A Kirana's claimed order shows as `ACCEPTED` until it calls `/ready`. Illegal moves return `409 ILLEGAL_STATE_TRANSITION`; a Kirana calling a restaurant-only endpoint gets `403 RESTAURANT_ONLY` (and vice versa `403 KIRANA_ONLY`).
 | GET | `/items?page&size` | paginated (`{items, page, size, totalItems}`), by category then name | ✅ |
 | POST | `/items` | see body below → 201 | ✅ |
 | PUT | `/items/{id}` | same body as POST | ✅ |

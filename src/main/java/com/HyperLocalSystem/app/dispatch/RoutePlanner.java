@@ -57,7 +57,7 @@ public class RoutePlanner {
     /** The order's stops that still make sense to visit, numbered from {@code firstSequence}. */
     public List<RouteStop> stopsFor(UnifiedOrder order, RiderRoute route, int firstSequence) {
         List<RouteStop> result = new ArrayList<>();
-        if (order.getKiranaId() != null && order.getGroceryStatus() == PartStatus.READY) {
+        if (order.isGroceryClaimed()) {
             result.add(pickupStop(route, order, StopType.KIRANA, order.getKiranaId()));
         }
         if (order.hasFood() && !order.getFoodStatus().isTerminal()) {

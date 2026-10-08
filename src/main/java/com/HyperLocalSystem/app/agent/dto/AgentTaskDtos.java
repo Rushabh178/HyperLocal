@@ -5,6 +5,8 @@ import com.HyperLocalSystem.app.common.model.StopState;
 import com.HyperLocalSystem.app.common.model.StopType;
 import com.HyperLocalSystem.app.common.model.TemperatureZone;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
@@ -60,11 +62,15 @@ public final class AgentTaskDtos {
     public record RejectOfferRequest(@Size(max = 100) String reason) {
     }
 
-    /** Payload of the merchant's in-store QR; scanning it releases the Kirana's payment. */
+    /** Payload of the store's QR (Kirana or restaurant); scanning it completes the pickup. */
     public record KiranaQrScanRequest(@NotBlank @Size(max = 512) String qrPayload) {
     }
 
     public record MarkDeficientRequest(@Size(max = 100) String reason) {
+    }
+
+    /** Items (stop item ids) the Kirana doesn't have. */
+    public record MarkMissingRequest(@NotEmpty List<@NotNull UUID> itemIds, @Size(max = 100) String reason) {
     }
 
     /** 4-digit code the customer reads out at the door. */

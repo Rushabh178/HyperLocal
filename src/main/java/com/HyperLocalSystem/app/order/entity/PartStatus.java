@@ -14,6 +14,8 @@ public enum PartStatus {
     NEW,
     /** Groceries: offered to nearby Kiranas, nobody has claimed it yet. */
     BROADCASTING,
+    /** Groceries: a Kirana tapped "Items in Hand" and is packing them. */
+    CLAIMED,
     /** Food: restaurant accepted and is preparing. */
     ACCEPTED,
     /** Food: restaurant reported a kitchen delay. */
@@ -30,7 +32,8 @@ public enum PartStatus {
         Set<PartStatus> allowed = switch (this) {
             case AWAITING_PAYMENT -> EnumSet.of(NEW, BROADCASTING, CANCELLED);
             case NEW -> EnumSet.of(ACCEPTED, CANCELLED);
-            case BROADCASTING -> EnumSet.of(READY, UNFULFILLED, CANCELLED);
+            case BROADCASTING -> EnumSet.of(CLAIMED, UNFULFILLED, CANCELLED);
+            case CLAIMED -> EnumSet.of(READY, PICKED_UP, UNFULFILLED, CANCELLED);
             case ACCEPTED, DELAYED -> EnumSet.of(DELAYED, READY, PICKED_UP, CANCELLED);
             case READY -> EnumSet.of(PICKED_UP, UNFULFILLED, CANCELLED);
             case PICKED_UP, UNFULFILLED, CANCELLED -> EnumSet.noneOf(PartStatus.class);

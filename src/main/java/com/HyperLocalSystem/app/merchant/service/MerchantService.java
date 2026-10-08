@@ -134,10 +134,10 @@ public class MerchantService {
                 won ? "The order is yours. Keep the items ready for the rider." : "Another store got this order first");
     }
 
-    /** Short-lived signed QR shown on the shop's phone; the rider scans it at pickup. */
+    /** Short-lived signed QR shown on the store's phone (Kirana and restaurant); the rider scans it at pickup. */
     @Transactional(readOnly = true)
     public StoreQrResponse storeQr(UUID merchantId) {
-        requireType(load(merchantId), MerchantType.KIRANA);
+        load(merchantId);
         StoreQrService.SignedQr qr = storeQrService.issue(merchantId);
         return new StoreQrResponse(qr.payload(), qr.expiresAt());
     }
@@ -180,8 +180,14 @@ public class MerchantService {
         return toMerchantOrder(order, ItemType.FOOD, orderItems.findByOrderIdAndTypeOrderByCreatedAt(orderId, ItemType.FOOD));
     }
 
+    /** Restaurant: food ready (ACCEPTED/DELAYED → READY). Kirana: groceries packed (CLAIMED → READY). */
     @Transactional
     public MerchantOrder markReady(UUID merchantId, UUID orderId) {
+        if (load(merchantId).getType() == MerchantType.KIRANA) {
+            UnifiedOrder order = orders.findByIdAndKiranaId(orderId, merchantId).orElseThrow(() -> ApiException.notFound("Order"));
+            order.moveGroceryTo(PartStatus.READY);
+            return toMerchantOrder(order, ItemType.GROCERY, orderItems.findByOrderIdAndTypeOrderByCreatedAt(orderId, ItemType.GROCERY));
+        }
         UnifiedOrder order = loadKitchenOrder(merchantId, orderId);
         order.moveFoodTo(PartStatus.READY);
         return toMerchantOrder(order, ItemType.FOOD, orderItems.findByOrderIdAndTypeOrderByCreatedAt(orderId, ItemType.FOOD));
@@ -218,13 +224,13 @@ public class MerchantService {
     }
 
     /** Merchants never see orders still awaiting payment or groceries still being broadcast. */
-    private static final Set<PartStatus> VISIBLE = EnumSet.of(PartStatus.NEW, PartStatus.ACCEPTED, PartStatus.DELAYED,
+    private static final Set<PartStatus> VISIBLE = EnumSet.of(PartStatus.NEW, PartStatus.ACCEPTED, PartStatus.CLAIMED, PartStatus.DELAYED,
             PartStatus.READY, PartStatus.PICKED_UP, PartStatus.UNFULFILLED, PartStatus.CANCELLED);
 
     private static Set<PartStatus> partStatuses(MerchantOrderStatus status) {
         return switch (status) {
             case NEW -> EnumSet.of(PartStatus.NEW);
-            case ACCEPTED, PREPARING -> EnumSet.of(PartStatus.ACCEPTED);
+            case ACCEPTED, PREPARING -> EnumSet.of(PartStatus.ACCEPTED, PartStatus.CLAIMED);
             case DELAYED -> EnumSet.of(PartStatus.DELAYED);
             case READY -> EnumSet.of(PartStatus.READY);
             case PICKED_UP -> EnumSet.of(PartStatus.PICKED_UP);
@@ -235,7 +241,7 @@ public class MerchantService {
     private static MerchantOrderStatus merchantStatus(PartStatus part) {
         return switch (part) {
             case NEW, AWAITING_PAYMENT, BROADCASTING -> MerchantOrderStatus.NEW;
-            case ACCEPTED -> MerchantOrderStatus.ACCEPTED;
+            case ACCEPTED, CLAIMED -> MerchantOrderStatus.ACCEPTED;
             case DELAYED -> MerchantOrderStatus.DELAYED;
             case READY -> MerchantOrderStatus.READY;
             case PICKED_UP -> MerchantOrderStatus.PICKED_UP;

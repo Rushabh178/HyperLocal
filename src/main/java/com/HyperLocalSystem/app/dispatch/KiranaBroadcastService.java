@@ -154,7 +154,7 @@ public class KiranaBroadcastService {
         BroadcastOffer offer = offers.findById(broadcastId).orElseThrow();
         UnifiedOrder order = orders.findById(offer.getOrderId()).orElseThrow();
         order.setKiranaId(merchantId);
-        order.moveGroceryTo(PartStatus.READY);
+        order.moveGroceryTo(PartStatus.CLAIMED);
         events.publishEvent(new KiranaClaimedEvent(order.getId(), merchantId));
         events.publishEvent(new BroadcastClosedEvent(broadcastId, merchantId, BroadcastCloseReason.CLAIMED));
         return true;

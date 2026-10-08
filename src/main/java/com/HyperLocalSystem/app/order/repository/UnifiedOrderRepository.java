@@ -28,6 +28,8 @@ public interface UnifiedOrderRepository extends JpaRepository<UnifiedOrder, UUID
 
     Optional<UnifiedOrder> findByIdAndRestaurantId(UUID id, UUID restaurantId);
 
+    Optional<UnifiedOrder> findByIdAndKiranaId(UUID id, UUID kiranaId);
+
     Page<UnifiedOrder> findByRestaurantIdAndFoodStatusInOrderByCreatedAtDesc(
             UUID restaurantId, Collection<PartStatus> statuses, Pageable pageable);
 
@@ -42,7 +44,7 @@ public interface UnifiedOrderRepository extends JpaRepository<UnifiedOrder, UUID
      */
     String AWAITING_RIDER = """
             o.status = 'CONFIRMED' and o.delivery_agent_id is null
-              and (o.food_status is not null or o.grocery_status = 'READY')
+              and (o.food_status is not null or o.grocery_status in ('CLAIMED', 'READY'))
               and not exists (select 1 from task_offers t where t.order_id = o.order_id and t.status = 'OFFERED')
             """;
 

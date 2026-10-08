@@ -16,3 +16,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_rider_routes_active ON rider_routes (agent_
 
 -- At most one pending offer per order, so two riders can never hold the same order at once.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_task_offers_open_per_order ON task_offers (order_id) WHERE status = 'OFFERED';
+
+-- Hibernate adds CHECK constraints for enum columns but never updates them, so constraints of enums
+-- that gained values are recreated here (CLAIMED was added to the order part status).
+ALTER TABLE unified_orders DROP CONSTRAINT IF EXISTS unified_orders_food_status_check;
+ALTER TABLE unified_orders ADD CONSTRAINT unified_orders_food_status_check CHECK (food_status IN
+    ('AWAITING_PAYMENT', 'NEW', 'BROADCASTING', 'CLAIMED', 'ACCEPTED', 'DELAYED', 'READY', 'PICKED_UP', 'UNFULFILLED', 'CANCELLED'));
+ALTER TABLE unified_orders DROP CONSTRAINT IF EXISTS unified_orders_grocery_status_check;
+ALTER TABLE unified_orders ADD CONSTRAINT unified_orders_grocery_status_check CHECK (grocery_status IN
+    ('AWAITING_PAYMENT', 'NEW', 'BROADCASTING', 'CLAIMED', 'ACCEPTED', 'DELAYED', 'READY', 'PICKED_UP', 'UNFULFILLED', 'CANCELLED'));

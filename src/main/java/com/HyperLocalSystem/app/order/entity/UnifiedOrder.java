@@ -206,6 +206,11 @@ public class UnifiedOrder {
         return groceryStatus != null;
     }
 
+    /** A Kirana has the groceries (packing or packed): its pickup belongs on the route. */
+    public boolean isGroceryClaimed() {
+        return kiranaId != null && (groceryStatus == PartStatus.CLAIMED || groceryStatus == PartStatus.READY);
+    }
+
     private static ApiException illegal(String what, Object from, Object to) {
         return ApiException.conflict("ILLEGAL_STATE_TRANSITION", what + " can't go from " + from + " to " + to);
     }

@@ -66,7 +66,8 @@ class TripFlowTest extends IntegrationTest {
                 Double.class, kirana.id(), UUID.fromString(orderId))).isEqualTo(60.0);
 
         post("/api/v1/agent/route/stops/" + restaurantStop + "/arrived", rider.token(), null);
-        post("/api/v1/agent/route/stops/" + restaurantStop + "/picked-up", rider.token(), null);
+        String restaurantQr = read(get("/api/v1/merchant/store-qr", restaurant.token()), "$.qrPayload");
+        post("/api/v1/agent/route/stops/" + restaurantStop + "/scan-qr", rider.token(), "{\"qrPayload\":\"%s\"}".formatted(restaurantQr));
         assertThat((String) read(get("/api/v1/customer/orders/" + orderId, customer.token()), "$.status")).isEqualTo("OUT_FOR_DELIVERY");
 
         // At the door: the wrong code is refused, the right one completes the trip and frees the rider.

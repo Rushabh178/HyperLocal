@@ -160,7 +160,7 @@ public class DispatchOrchestrator {
     @Transactional
     public boolean offerNextRider(UnifiedOrder order) {
         boolean needsRider = order.getStatus() == OrderStatus.CONFIRMED && order.getDeliveryAgentId() == null
-                && (order.hasFood() || order.getGroceryStatus() == PartStatus.READY);
+                && (order.hasFood() || order.isGroceryClaimed());
         if (!needsRider) {
             return false;
         }
@@ -233,7 +233,7 @@ public class DispatchOrchestrator {
     // ----------------------------------------------------------------- helpers
 
     private GeoPoint firstPickup(UnifiedOrder order) {
-        UUID merchantId = order.getKiranaId() != null && order.getGroceryStatus() == PartStatus.READY
+        UUID merchantId = order.isGroceryClaimed()
                 ? order.getKiranaId() : order.getRestaurantId();
         return merchants.findById(merchantId).map(m -> GeoUtils.fromPoint(m.getLocation())).orElseThrow();
     }

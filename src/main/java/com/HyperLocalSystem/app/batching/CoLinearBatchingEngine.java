@@ -105,7 +105,7 @@ public class CoLinearBatchingEngine {
      */
     @Transactional
     public Optional<Injection> tryInject(UnifiedOrder order) {
-        boolean eligible = !order.hasFood() && order.getGroceryStatus() == PartStatus.READY && order.getKiranaId() != null
+        boolean eligible = !order.hasFood() && order.isGroceryClaimed()
                 && order.getStatus() == OrderStatus.CONFIRMED && order.getDeliveryAgentId() == null;
         if (!eligible) {
             return Optional.empty();

@@ -7,6 +7,7 @@ import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.EarningsPeriod;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.EarningsSummary;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.KiranaQrScanRequest;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.MarkDeficientRequest;
+import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.MarkMissingRequest;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.PayoutItem;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.RejectOfferRequest;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.TaskOffer;
@@ -68,22 +69,32 @@ public class AgentTaskController {
         return taskService.arrivedAtStop(CurrentUser.id(jwt), stopId);
     }
 
-    @PostMapping("/route/stops/{stopId}/kirana-qr")
-    public ActiveRouteResponse scanKiranaQr(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID stopId,
-                                            @Valid @RequestBody KiranaQrScanRequest request) {
-        return taskService.scanKiranaQr(CurrentUser.id(jwt), stopId, request);
+    /** Pickup step 3 at every store: scanning the store's QR completes the stop. */
+    @PostMapping({"/route/stops/{stopId}/scan-qr", "/route/stops/{stopId}/kirana-qr"})
+    public ActiveRouteResponse scanQr(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID stopId,
+                                      @Valid @RequestBody KiranaQrScanRequest request) {
+        return taskService.scanQr(CurrentUser.id(jwt), stopId, request);
+    }
+
+    /** Pickup step 2 (Kirana, optional): mark missing items. 409 once the stop is done. */
+    @PostMapping("/route/stops/{stopId}/deficient")
+    public ActiveRouteResponse markMissing(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID stopId,
+                                           @Valid @RequestBody MarkMissingRequest request) {
+        return taskService.markMissing(CurrentUser.id(jwt), stopId, request.itemIds());
     }
 
     @PostMapping("/route/stops/{stopId}/items/{itemId}/deficient")
     public ActiveRouteResponse markDeficient(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID stopId,
                                              @PathVariable UUID itemId,
                                              @Valid @RequestBody(required = false) MarkDeficientRequest request) {
-        return taskService.markItemDeficient(CurrentUser.id(jwt), stopId, itemId, request);
+        return taskService.markMissing(CurrentUser.id(jwt), stopId, List.of(itemId));
     }
 
+    /** Alias of scan-qr kept for older apps; it needs the same {qrPayload} body (400 QR_REQUIRED without it). */
     @PostMapping("/route/stops/{stopId}/picked-up")
-    public ActiveRouteResponse pickedUp(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID stopId) {
-        return taskService.confirmPickup(CurrentUser.id(jwt), stopId);
+    public ActiveRouteResponse pickedUp(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID stopId,
+                                        @RequestBody(required = false) KiranaQrScanRequest request) {
+        return taskService.scanQr(CurrentUser.id(jwt), stopId, request);
     }
 
     @PostMapping("/orders/{orderId}/deliver")
