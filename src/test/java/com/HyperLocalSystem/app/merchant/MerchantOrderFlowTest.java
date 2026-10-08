@@ -1,11 +1,10 @@
 package com.HyperLocalSystem.app.merchant;
 
-import com.HyperLocalSystem.app.dispatch.KiranaBroadcastService;
 import com.HyperLocalSystem.app.support.IntegrationTest;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpMethod;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -16,12 +15,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 /** Phase 6: the restaurant works its kitchen ticket; two Kiranas race for the grocery broadcast. */
 class MerchantOrderFlowTest extends IntegrationTest {
-
-    @Autowired
-    KiranaBroadcastService broadcastService;
 
     @Test
     void kitchenTicketAndFirstClaimWins() throws Exception {
@@ -56,9 +53,10 @@ class MerchantOrderFlowTest extends IntegrationTest {
         assertThat((String) read(illegal, "$.code")).isEqualTo("ILLEGAL_STATE_TRANSITION");
         call(HttpMethod.POST, "/api/v1/merchant/orders/" + orderId + "/ready", kirana1.token(), null, 403);
 
-        // ---- groceries: both Kiranas get the broadcast, both tap at once, exactly one wins.
-        UUID broadcastId = broadcastService.broadcast(UUID.fromString(orderId)).getId();
+        // ---- groceries: confirming the order broadcast them to both Kiranas; both tap at once, exactly one wins.
+        await().atMost(Duration.ofSeconds(10)).until(() -> !((List<?>) read(get("/api/v1/merchant/broadcasts", kirana2.token()), "$")).isEmpty());
         String seen = get("/api/v1/merchant/broadcasts", kirana2.token());
+        UUID broadcastId = UUID.fromString(read(seen, "$[0].broadcastId"));
         assertThat((Double) read(seen, "$[0].payoutAmount")).isEqualTo(60.0);
         assertThat((List<String>) read(seen, "$[0].items[*].name")).containsExactly("Toned Milk");
 

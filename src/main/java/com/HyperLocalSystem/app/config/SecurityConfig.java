@@ -56,6 +56,8 @@ public class SecurityConfig {
                         // STOMP CONNECT frames carry the JWT and are checked in WebSocketConfig.
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/error").permitAll()
+                        // KYC uploads: authorised by the signed, short-lived URL itself (see FileStorage).
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/files/upload").permitAll()
                         .requestMatchers("/api/v1/customer/**", "/api/v1/payments/**").hasRole(Role.CUSTOMER.name())
                         .requestMatchers("/api/v1/agent/**").hasRole(Role.DELIVERY_AGENT.name())
                         .requestMatchers("/api/v1/merchant/**").hasRole(Role.MERCHANT.name())

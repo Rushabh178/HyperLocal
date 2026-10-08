@@ -7,7 +7,7 @@ import java.time.Duration;
 
 /** Typed view of the {@code app.*} settings in application.properties. */
 @ConfigurationProperties(prefix = "app")
-public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing, Payment payment, Admin admin) {
+public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing, Payment payment, Admin admin, Storage storage) {
 
     public record Jwt(String secret, String issuer, Duration accessTokenTtl, Duration refreshTokenTtl) {
     }
@@ -35,7 +35,17 @@ public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing, Payment 
             /** One flat platform fee per order, whatever it contains. */
             BigDecimal convenienceFee,
             /** GST on restaurant food, e.g. 0.05. Groceries are priced tax-inclusive (MRP). */
-            BigDecimal foodTaxRate
+            BigDecimal foodTaxRate,
+            /** Combined orders: wait this long before broadcasting, so groceries aren't picked up long before the food. */
+            Duration kiranaBroadcastCombinedDelay,
+            /** How far from the first pickup to look for a free rider. */
+            int riderSearchRadiusMeters,
+            /** A rider must accept an offer within this time, else it goes to the next rider. */
+            Duration riderOfferTimeout,
+            /** Paid per delivered order. */
+            BigDecimal riderBasePay,
+            /** Paid per extra pickup on the same order (Kirana + restaurant = 1 extra). */
+            BigDecimal riderMultiStopBonus
     ) {
     }
 
@@ -52,5 +62,9 @@ public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing, Payment 
 
     /** First ops admin, created on startup when the email is set (ADMIN_EMAIL / ADMIN_PASSWORD / ADMIN_NAME). */
     public record Admin(String seedEmail, String seedPassword, String seedName) {
+    }
+
+    /** Local-disk file storage (dev default): where files go and the public URL prefix used in links. */
+    public record Storage(String localDir, String publicBaseUrl) {
     }
 }

@@ -140,6 +140,15 @@ public abstract class IntegrationTest {
         return verify("/api/v1/agent/auth/verify-phone", phone, read(signup, "$.userId"));
     }
 
+    /** An approved bicycle partner, online at {@code location} (a {@link #point} JSON). */
+    protected Session onlineRider(String location) throws Exception {
+        Session rider = signUpAgent();
+        jdbc.update("update delivery_agents set verification_status = 'APPROVED' where agent_id = ?", rider.id());
+        put("/api/v1/agent/me/duty", rider.token(), "{\"online\":true}");
+        call(HttpMethod.POST, "/api/v1/agent/me/location", rider.token(), "{\"location\":%s}".formatted(location), 204);
+        return rider;
+    }
+
     protected String adminToken() throws Exception {
         return read(post("/api/v1/admin/auth/login", null,
                 "{\"identifier\":\"admin@test.local\",\"password\":\"admin-pass-123\"}"), "$.accessToken");

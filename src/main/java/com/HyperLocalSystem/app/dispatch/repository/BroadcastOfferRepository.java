@@ -1,13 +1,16 @@
 package com.HyperLocalSystem.app.dispatch.repository;
 
 import com.HyperLocalSystem.app.dispatch.entity.BroadcastOffer;
+import com.HyperLocalSystem.app.dispatch.entity.BroadcastStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface BroadcastOfferRepository extends JpaRepository<BroadcastOffer, UUID> {
@@ -35,13 +38,16 @@ public interface BroadcastOfferRepository extends JpaRepository<BroadcastOffer, 
 
     List<BroadcastOffer> findByOrderIdOrderByRoundDesc(UUID orderId);
 
-    /** Rounds whose time has come: SCHEDULED to open, OPEN to expire. SKIP LOCKED lets several instances share the work. */
-    @Query(value = """
-            select * from broadcast_offers
-            where (status = 'SCHEDULED' and starts_at <= :now) or (status = 'OPEN' and expires_at <= :now)
-            order by starts_at
-            limit :limit
-            for update skip locked
-            """, nativeQuery = true)
-    List<BroadcastOffer> lockDue(@Param("now") Instant now, @Param("limit") int limit);
+    String DUE = "((status = 'SCHEDULED' and starts_at <= :now) or (status = 'OPEN' and expires_at <= :now))";
+
+    /** Rounds whose time has come: SCHEDULED ones to open, OPEN ones to expire. */
+    @Query(value = "select offer_id from broadcast_offers where " + DUE + " order by starts_at limit :limit", nativeQuery = true)
+    List<UUID> findDueIds(@Param("now") Instant now, @Param("limit") int limit);
+
+    /** Locks one due round; empty if another instance is already handling it. */
+    @Query(value = "select * from broadcast_offers where offer_id = :offerId and " + DUE + " for update skip locked",
+            nativeQuery = true)
+    Optional<BroadcastOffer> lockIfDue(@Param("offerId") UUID offerId, @Param("now") Instant now);
+
+    List<BroadcastOffer> findByOrderIdAndStatusIn(UUID orderId, Collection<BroadcastStatus> statuses);
 }

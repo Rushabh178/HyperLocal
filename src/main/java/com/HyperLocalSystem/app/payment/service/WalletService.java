@@ -37,13 +37,18 @@ public class WalletService {
                 e -> new WalletTransaction(e.getId(), e.getType(), e.getAmount(), e.getReason(), e.getOrderId(), e.getCreatedAt()));
     }
 
-    /** Idempotent on {@code reference}: crediting the same refund twice is a no-op. */
+    /**
+     * Idempotent on {@code reference}: crediting the same refund twice is a no-op.
+     *
+     * @return true if a new entry was written
+     */
     @Transactional
-    public void credit(UUID customerId, BigDecimal amount, String reason, UUID orderId, String reference) {
+    public boolean credit(UUID customerId, BigDecimal amount, String reason, UUID orderId, String reference) {
         if (amount.signum() <= 0 || entries.existsByReference(reference)) {
-            return;
+            return false;
         }
         entries.save(new WalletEntry(customerId, WalletTransactionType.CREDIT, amount, reason, orderId, reference));
+        return true;
     }
 
     /**

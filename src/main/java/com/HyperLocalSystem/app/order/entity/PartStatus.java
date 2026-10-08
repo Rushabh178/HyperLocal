@@ -32,7 +32,7 @@ public enum PartStatus {
             case NEW -> EnumSet.of(ACCEPTED, CANCELLED);
             case BROADCASTING -> EnumSet.of(READY, UNFULFILLED, CANCELLED);
             case ACCEPTED, DELAYED -> EnumSet.of(DELAYED, READY, PICKED_UP, CANCELLED);
-            case READY -> EnumSet.of(PICKED_UP, CANCELLED);
+            case READY -> EnumSet.of(PICKED_UP, UNFULFILLED, CANCELLED);
             case PICKED_UP, UNFULFILLED, CANCELLED -> EnumSet.noneOf(PartStatus.class);
         };
         return allowed.contains(next);

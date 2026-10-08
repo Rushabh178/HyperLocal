@@ -3,10 +3,12 @@ package com.HyperLocalSystem.app.payment.service;
 import com.HyperLocalSystem.app.common.exception.ApiException;
 import com.HyperLocalSystem.app.common.exception.NotImplementedException;
 import com.HyperLocalSystem.app.payment.dto.PaymentDtos.PaymentHoldResponse;
+import com.HyperLocalSystem.app.payment.entity.MerchantSettlement;
 import com.HyperLocalSystem.app.payment.entity.Payment;
 import com.HyperLocalSystem.app.payment.entity.PaymentMethod;
 import com.HyperLocalSystem.app.payment.entity.PaymentStatus;
 import com.HyperLocalSystem.app.payment.gateway.PaymentGateway;
+import com.HyperLocalSystem.app.payment.repository.MerchantSettlementRepository;
 import com.HyperLocalSystem.app.payment.repository.PaymentRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -27,6 +29,7 @@ public class PaymentService {
     private static final String WALLET_GATEWAY = "WALLET";
 
     private final PaymentRepository payments;
+    private final MerchantSettlementRepository settlements;
     private final PaymentGateway gateway;
     private final WalletService walletService;
 
@@ -83,14 +86,61 @@ public class PaymentService {
         throw new NotImplementedException("Payment webhook");
     }
 
-    /** Called when the rider scans the Kirana's in-store QR: pays the shop its share. */
-    public void captureForMerchant(UUID orderId, UUID merchantId) {
-        throw new NotImplementedException("Merchant payment capture");
+    /**
+     * Pickup at a store (Kirana QR scan / restaurant hand-over): takes the customer's money if it is
+     * still only held, and records what the store is owed. Idempotent per (store, order).
+     */
+    @Transactional
+    public void captureForMerchant(UUID orderId, UUID merchantId, BigDecimal amount) {
+        Payment payment = load(orderId);
+        ensureCaptured(payment);
+        if (!settlements.existsByMerchantIdAndOrderId(merchantId, orderId)) {
+            settlements.save(new MerchantSettlement(merchantId, orderId, amount));
+        }
+        // TODO(edge-case): platform commission and the actual bank payout to the store.
     }
 
-    /** Point-of-collection discrepancy: refund the missing items to the customer's wallet. */
-    public void partialRefundToWallet(UUID orderId, BigDecimal amount, String reason) {
-        throw new NotImplementedException("Partial refund");
+    /** Delivery: make sure the money is taken (normally already done at the first pickup). */
+    @Transactional
+    public void ensureCaptured(UUID orderId) {
+        ensureCaptured(load(orderId));
+    }
+
+    /**
+     * Missing items / unavailable groceries: credit {@code amount} to the customer's wallet.
+     * A still-held UPI payment is captured first, so a later cancellation can only ever refund what
+     * is left. Idempotent on {@code reference}.
+     */
+    @Transactional
+    public void partialRefundToWallet(UUID orderId, BigDecimal amount, String reason, String reference) {
+        Payment payment = load(orderId);
+        ensureCaptured(payment);
+        BigDecimal refundable = payment.getCapturedAmount().subtract(payment.getRefundedAmount());
+        BigDecimal refund = amount.min(refundable);
+        if (refund.signum() <= 0 || !walletService.credit(payment.getCustomerId(), refund, reason, orderId, reference)) {
+            return;
+        }
+        payment.setRefundedAmount(payment.getRefundedAmount().add(refund));
+        payment.moveTo(payment.getRefundedAmount().compareTo(payment.getCapturedAmount()) >= 0
+                ? PaymentStatus.REFUNDED : PaymentStatus.PARTIALLY_REFUNDED);
+    }
+
+    private void ensureCaptured(Payment payment) {
+        switch (payment.getStatus()) {
+            case HELD -> {
+                gateway.capture(payment.getGatewayReference(), payment.getAmount());
+                payment.moveTo(PaymentStatus.CAPTURED);
+                payment.setCapturedAmount(payment.getAmount());
+            }
+            case CAPTURED, PARTIALLY_REFUNDED, REFUNDED -> {
+            }
+            case HOLD_PENDING, FAILED, RELEASED ->
+                    throw ApiException.conflict("PAYMENT_NOT_SECURED", "The payment for this order is not secured");
+        }
+    }
+
+    private Payment load(UUID orderId) {
+        return payments.findByOrderId(orderId).orElseThrow(() -> ApiException.notFound("Payment"));
     }
 
     /**
@@ -109,8 +159,9 @@ public class PaymentService {
                 }
                 case CAPTURED, PARTIALLY_REFUNDED -> {
                     BigDecimal refundable = payment.getCapturedAmount().subtract(payment.getRefundedAmount());
-                    walletService.credit(payment.getCustomerId(), refundable, reason, orderId, "refund:cancel:" + orderId);
-                    payment.setRefundedAmount(payment.getRefundedAmount().add(refundable));
+                    if (walletService.credit(payment.getCustomerId(), refundable, reason, orderId, "refund:cancel:" + orderId)) {
+                        payment.setRefundedAmount(payment.getRefundedAmount().add(refundable));
+                    }
                     payment.moveTo(PaymentStatus.REFUNDED);
                 }
                 case RELEASED, REFUNDED, FAILED -> {

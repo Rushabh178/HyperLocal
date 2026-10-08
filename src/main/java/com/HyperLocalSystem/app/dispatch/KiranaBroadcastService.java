@@ -1,7 +1,6 @@
 package com.HyperLocalSystem.app.dispatch;
 
 import com.HyperLocalSystem.app.common.exception.ApiException;
-import com.HyperLocalSystem.app.common.exception.NotImplementedException;
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
 import com.HyperLocalSystem.app.common.geo.GeoUtils;
 import com.HyperLocalSystem.app.config.AppProperties;
@@ -13,10 +12,13 @@ import com.HyperLocalSystem.app.dispatch.repository.BroadcastTargetRepository;
 import com.HyperLocalSystem.app.merchant.entity.MerchantType;
 import com.HyperLocalSystem.app.merchant.repository.MerchantRepository;
 import com.HyperLocalSystem.app.merchant.repository.NearbyMerchant;
+import com.HyperLocalSystem.app.order.entity.OrderStatus;
 import com.HyperLocalSystem.app.order.entity.PartStatus;
 import com.HyperLocalSystem.app.order.entity.UnifiedOrder;
 import com.HyperLocalSystem.app.order.event.OrderEvents.KiranaClaimedEvent;
 import com.HyperLocalSystem.app.order.repository.UnifiedOrderRepository;
+import com.HyperLocalSystem.app.order.service.OrderLifecycle;
+import com.HyperLocalSystem.app.payment.service.PaymentService;
 import com.HyperLocalSystem.app.spatial.SpatialIndexService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,14 +26,17 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
 /**
  * Crowdsourced inventory claim (blueprint §3 step 3 and the "Silent Broadcast Timeout" edge case).
- * Each round is a broadcast_offers row with its targets in broadcast_targets; the first targeted
- * Kirana to tap "Items in Hand" wins through an atomic conditional UPDATE.
+ * Each round is a broadcast_offers row with its targets in broadcast_targets. Round timing lives in
+ * the row and {@link DispatchScheduler} advances due rounds, so no in-memory timer is involved and
+ * any instance can do the work. The first targeted Kirana to tap "Items in Hand" wins through an
+ * atomic conditional UPDATE.
  */
 @Slf4j
 @Service
@@ -43,19 +48,12 @@ public class KiranaBroadcastService {
     private final UnifiedOrderRepository orders;
     private final MerchantRepository merchants;
     private final SpatialIndexService spatialIndex;
+    private final OrderLifecycle lifecycle;
+    private final PaymentService paymentService;
     private final AppProperties properties;
     private final ApplicationEventPublisher events;
 
-    /** Starts round 1 for the order's groceries now. Returns the round, or empty targets if no Kirana is open nearby. */
-    @Transactional
-    public BroadcastOffer broadcast(UUID orderId) {
-        UnifiedOrder order = orders.findById(orderId).orElseThrow(() -> ApiException.notFound("Order"));
-        BroadcastOffer offer = schedule(order, 1, Instant.now());
-        open(offer);
-        return offer;
-    }
-
-    /** Creates a round that the poller (or the caller) opens at {@code startsAt}. */
+    /** Creates a round that opens at {@code startsAt}; opened right away when that is already due. */
     @Transactional
     public BroadcastOffer schedule(UnifiedOrder order, int round, Instant startsAt) {
         GeoPoint origin = origin(order);
@@ -66,27 +64,72 @@ public class KiranaBroadcastService {
         offer.setOriginLat(origin.lat());
         offer.setOriginLng(origin.lng());
         offer.setStartsAt(startsAt);
-        return offers.save(offer);
+        offers.save(offer);
+        if (!startsAt.isAfter(Instant.now())) {
+            advance(offer);
+        }
+        return offer;
+    }
+
+    /**
+     * Moves a due round forward: a SCHEDULED round opens (or, with nobody in range, rolls straight on);
+     * an expired OPEN round gives way to the next, wider round; after the last round the grocery part
+     * is UNFULFILLED. Rounds of cancelled / already-claimed orders are simply closed.
+     */
+    @Transactional
+    public void advance(BroadcastOffer offer) {
+        UnifiedOrder order = orders.findById(offer.getOrderId()).orElseThrow();
+        if (order.getGroceryStatus() != PartStatus.BROADCASTING || !OrderStatus.ACTIVE.contains(order.getStatus())) {
+            offer.setStatus(BroadcastStatus.CANCELLED);
+            return;
+        }
+        if (offer.getStatus() == BroadcastStatus.SCHEDULED && open(offer)) {
+            return;
+        }
+        offer.setStatus(BroadcastStatus.EXPIRED);
+        if (offer.getRound() >= properties.ops().kiranaBroadcastMaxRounds()) {
+            unfulfilled(order);
+        } else {
+            schedule(order, offer.getRound() + 1, Instant.now());
+        }
     }
 
     /**
      * Pings the {@code ops.kiranaBroadcastFanout} (5) nearest open Kiranas not pinged in earlier
-     * rounds, within this round's radius (500 m, then 1 km, ...). Returns false when nobody is in range.
+     * rounds, within this round's radius (500 m, then 1 km, ...: the H3 disk widens with it).
+     * Returns false when nobody is in range.
      */
-    @Transactional
-    public boolean open(BroadcastOffer offer) {
+    private boolean open(BroadcastOffer offer) {
         AppProperties.Ops ops = properties.ops();
         int radius = radiusForRound(offer.getRound());
         List<NearbyMerchant> kiranas = targets.findNextKiranas(
                 spatialIndex.cellsWithin(offer.getOriginLat(), offer.getOriginLng(), radius), MerchantType.KIRANA.name(),
                 offer.getOriginLat(), offer.getOriginLng(), radius, offer.getOrderId(), ops.kiranaBroadcastFanout());
-        Instant now = Instant.now();
-        offer.setStatus(BroadcastStatus.OPEN);
-        offer.setExpiresAt(kiranas.isEmpty() ? now : now.plus(ops.kiranaClaimTimeout()));
-        kiranas.forEach(k -> targets.save(new BroadcastTarget(offer.getId(), k.getId(), (int) Math.round(k.getDistanceMeters()))));
         log.info("Broadcast round {} for order {}: {} Kiranas within {} m", offer.getRound(), offer.getOrderId(), kiranas.size(), radius);
+        if (kiranas.isEmpty()) {
+            return false;
+        }
+        offer.setStatus(BroadcastStatus.OPEN);
+        offer.setExpiresAt(Instant.now().plus(ops.kiranaClaimTimeout()));
+        kiranas.forEach(k -> targets.save(new BroadcastTarget(offer.getId(), k.getId(), (int) Math.round(k.getDistanceMeters()))));
         // TODO(edge-case): push the broadcast to the Kiranas' phones (FCM); for now they poll GET /merchant/broadcasts.
-        return !kiranas.isEmpty();
+        return true;
+    }
+
+    /**
+     * No Kirana anywhere in range: a grocery-only order is cancelled (money back); a combined order
+     * carries on with the food and the grocery amount goes back to the wallet.
+     * TODO(edge-case): fall back to the dark-store hub before giving up; recompute the delivery fee.
+     */
+    private void unfulfilled(UnifiedOrder order) {
+        log.info("Groceries of order {} unfulfilled: no Kirana claimed them", order.getId());
+        order.moveGroceryTo(PartStatus.UNFULFILLED);
+        if (!order.hasFood()) {
+            lifecycle.cancel(order, "No store nearby had these items");
+        } else {
+            paymentService.partialRefundToWallet(order.getId(), order.getGrocerySubtotal(),
+                    "Groceries unavailable nearby", "refund:groceries:" + order.getId());
+        }
     }
 
     /**
@@ -111,12 +154,19 @@ public class KiranaBroadcastService {
         return offers.findOpenFor(merchantId, Instant.now());
     }
 
-    /**
-     * No claim in 60 s: expand to the next H3 ring and ping the next 5 closest shops. If that fails
-     * too, the grocery part becomes UNFULFILLED.
-     */
-    public void onClaimTimeout(UUID broadcastId) {
-        throw new NotImplementedException("Broadcast ring expansion");
+    /** The kitchen is late: rounds that haven't started yet start later too. */
+    @Transactional
+    public void postpone(UUID orderId, Duration delay) {
+        offers.findByOrderIdAndStatusIn(orderId, List.of(BroadcastStatus.SCHEDULED))
+                .forEach(offer -> offer.setStartsAt(offer.getStartsAt().plus(delay)));
+        // TODO(edge-case): if a Kirana already claimed it, push the rider's Kirana stop back instead.
+    }
+
+    /** The order was cancelled: close its rounds so no Kirana can claim it any more. */
+    @Transactional
+    public void cancelFor(UUID orderId) {
+        offers.findByOrderIdAndStatusIn(orderId, List.of(BroadcastStatus.SCHEDULED, BroadcastStatus.OPEN))
+                .forEach(offer -> offer.setStatus(BroadcastStatus.CANCELLED));
     }
 
     int radiusForRound(int round) {

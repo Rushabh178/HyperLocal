@@ -13,7 +13,9 @@ import com.HyperLocalSystem.app.dispatch.KiranaBroadcastService;
 import com.HyperLocalSystem.app.dispatch.entity.BroadcastOffer;
 import com.HyperLocalSystem.app.dispatch.entity.BroadcastTarget;
 import com.HyperLocalSystem.app.dispatch.repository.BroadcastOfferRepository;
+import com.HyperLocalSystem.app.dispatch.entity.RouteStop;
 import com.HyperLocalSystem.app.dispatch.repository.BroadcastTargetRepository;
+import com.HyperLocalSystem.app.dispatch.repository.RouteStopRepository;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.AcceptOrderRequest;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.BroadcastItem;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.CatalogItemRequest;
@@ -65,6 +67,7 @@ public class MerchantService {
     private final DeliveryAgentRepository agents;
     private final BroadcastOfferRepository broadcastOffers;
     private final BroadcastTargetRepository broadcastTargets;
+    private final RouteStopRepository routeStops;
     private final KiranaBroadcastService broadcastService;
     private final StoreQrService storeQrService;
     private final ApplicationEventPublisher events;
@@ -179,8 +182,11 @@ public class MerchantService {
         BigDecimal amount = type == ItemType.FOOD ? order.getFoodSubtotal() : order.getGrocerySubtotal();
         String riderName = order.getDeliveryAgentId() == null ? null
                 : agents.findById(order.getDeliveryAgentId()).map(DeliveryAgent::getName).orElse(null);
+        UUID merchantId = type == ItemType.FOOD ? order.getRestaurantId() : order.getKiranaId();
+        Instant riderEta = order.getDeliveryAgentId() == null ? null
+                : routeStops.findFirstByOrderIdAndMerchantId(order.getId(), merchantId).map(RouteStop::getEta).orElse(null);
         return new MerchantOrder(order.getId(), merchantStatus(part), toBroadcastItems(items), amount,
-                order.getPrepReadyAt(), riderName, null);
+                order.getPrepReadyAt(), riderName, riderEta);
     }
 
     private Map<UUID, List<OrderItem>> itemsByOrder(List<UUID> orderIds, ItemType type) {

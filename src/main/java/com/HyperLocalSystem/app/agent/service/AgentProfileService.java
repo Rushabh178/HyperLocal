@@ -17,14 +17,17 @@ import com.HyperLocalSystem.app.agent.entity.VerificationStatus;
 import com.HyperLocalSystem.app.agent.repository.AgentDocumentRepository;
 import com.HyperLocalSystem.app.agent.repository.DeliveryAgentRepository;
 import com.HyperLocalSystem.app.common.exception.ApiException;
-import com.HyperLocalSystem.app.common.exception.NotImplementedException;
 import com.HyperLocalSystem.app.common.geo.GeoUtils;
 import com.HyperLocalSystem.app.common.model.AccountStatus;
+import com.HyperLocalSystem.app.agent.event.AgentLocationUpdatedEvent;
 import com.HyperLocalSystem.app.spatial.SpatialIndexService;
+import com.HyperLocalSystem.app.storage.FileStorage;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
@@ -38,6 +41,10 @@ public class AgentProfileService {
     private final DeliveryAgentRepository agents;
     private final AgentDocumentRepository documents;
     private final SpatialIndexService spatialIndex;
+    private final FileStorage fileStorage;
+    private final ApplicationEventPublisher events;
+
+    private static final Duration UPLOAD_URL_TTL = Duration.ofMinutes(15);
 
     // ----------------------------------------------------------------- profile
 
@@ -105,9 +112,24 @@ public class AgentProfileService {
         return documentsResponse(agent);
     }
 
-    /** TODO: return a pre-signed S3/GCS PUT URL scoped to agents/{agentId}/{type}/{uuid}. */
+    /**
+     * A short-lived upload link scoped to agents/{agentId}/{type}/{uuid}. The app PUTs the file there,
+     * then saves the returned {@code fileUrl} with PUT /documents/{type}.
+     */
+    @Transactional(readOnly = true)
     public DocumentUploadUrlResponse createDocumentUploadUrl(UUID agentId, DocumentType type, DocumentUploadUrlRequest request) {
-        throw new NotImplementedException("KYC document upload URL");
+        DeliveryAgent agent = load(agentId);
+        if (agent.getVerificationStatus() == VerificationStatus.APPROVED) {
+            throw ApiException.conflict("DOCUMENTS_LOCKED", "Your documents are already verified. Contact support to change them.");
+        }
+        String extension = switch (request.contentType()) {
+            case "image/png" -> "png";
+            case "application/pdf" -> "pdf";
+            default -> "jpg";
+        };
+        String key = "agents/%s/%s/%s.%s".formatted(agentId, type.name().toLowerCase(Locale.ROOT), UUID.randomUUID(), extension);
+        FileStorage.UploadTarget target = fileStorage.createUpload(key, request.contentType(), UPLOAD_URL_TTL);
+        return new DocumentUploadUrlResponse(target.uploadUrl(), target.fileUrl(), target.expiresAt());
     }
 
     // ----------------------------------------------------------------- duty & location
@@ -133,7 +155,7 @@ public class AgentProfileService {
 
     /**
      * Stores the live position and its H3 cell. Shared by the REST endpoint and the WebSocket stream.
-     * TODO: publish to the tracking topic of the agent's active orders and feed the batching engine.
+     * While on a trip, the customers being served get the new position and ETA (after commit).
      */
     @Transactional
     public void updateLocation(UUID agentId, LocationUpdateRequest request) {
@@ -145,6 +167,10 @@ public class AgentProfileService {
         double lng = request.location().lng();
         agent.setCurrentLocation(GeoUtils.toPoint(lat, lng));
         agent.setH3Index(spatialIndex.cellOf(lat, lng));
+        if (agent.getDutyStatus() == DutyStatus.ACTIVE) {
+            events.publishEvent(new AgentLocationUpdatedEvent(agentId));
+        }
+        // TODO(edge-case): throttle pushes / DB writes for very chatty clients (e.g. one per 2 s per rider).
     }
 
     // ----------------------------------------------------------------- helpers

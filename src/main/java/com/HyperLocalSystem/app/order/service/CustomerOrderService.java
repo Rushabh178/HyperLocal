@@ -18,6 +18,8 @@ import com.HyperLocalSystem.app.common.model.StopType;
 import com.HyperLocalSystem.app.customer.entity.CustomerAddress;
 import com.HyperLocalSystem.app.customer.repository.CustomerAddressRepository;
 import com.HyperLocalSystem.app.customer.service.CustomerAddressService;
+import com.HyperLocalSystem.app.dispatch.entity.RouteStop;
+import com.HyperLocalSystem.app.dispatch.repository.RouteStopRepository;
 import com.HyperLocalSystem.app.merchant.entity.Merchant;
 import com.HyperLocalSystem.app.merchant.repository.MerchantRepository;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.AgentInfo;
@@ -74,6 +76,8 @@ public class CustomerOrderService {
     private final PaymentService paymentService;
     private final OrderLifecycle lifecycle;
     private final SpatialIndexService spatialIndex;
+    private final RouteStopRepository routeStopRepository;
+    private final TrackingService trackingService;
     private final ApplicationEventPublisher events;
 
     /**
@@ -147,10 +151,24 @@ public class CustomerOrderService {
         return toDetail(load(customerId, orderId));
     }
 
-    /** Single line Kirana → Restaurant → Home; icons light up as the parts and the rider progress. */
+    /**
+     * Single line Kirana → Restaurant → Home; icons light up as the rider progresses. Once a rider has
+     * the order, the line is the rider's actual stops (with ETAs); before that it is built from the
+     * order's parts.
+     */
     @Transactional(readOnly = true)
     public TimelineResponse timeline(UUID customerId, UUID orderId) {
         UnifiedOrder order = load(customerId, orderId);
+        List<RouteStop> routeStops = routeStopRepository.findByOrderIdOrderBySequence(orderId);
+        if (!routeStops.isEmpty()) {
+            List<TimelineStop> line = routeStops.stream()
+                    .map(s -> new TimelineStop(s.getType(), s.getType() == StopType.CUSTOMER ? "Home" : s.getName(),
+                            s.getState(), s.getEta(), s.getCompletedAt()))
+                    .toList();
+            Instant deliveredBy = routeStops.stream().filter(s -> s.getType() == StopType.CUSTOMER)
+                    .map(RouteStop::getEta).findFirst().orElse(null);
+            return new TimelineResponse(order.getId(), order.getStatus(), line, deliveredBy);
+        }
         List<TimelineStop> stops = new ArrayList<>();
         if (order.hasGroceries()) {
             String name = order.getKiranaId() == null ? "Finding a store nearby" : storeName(order.getKiranaId());
@@ -172,10 +190,7 @@ public class CustomerOrderService {
 
     @Transactional(readOnly = true)
     public TrackingResponse tracking(UUID customerId, UUID orderId) {
-        UnifiedOrder order = load(customerId, orderId);
-        DeliveryAgent agent = order.getDeliveryAgentId() == null ? null : agents.findById(order.getDeliveryAgentId()).orElse(null);
-        return new TrackingResponse(order.getId(), order.getStatus(),
-                agent == null ? null : GeoUtils.fromPoint(agent.getCurrentLocation()), null, Instant.now());
+        return trackingService.snapshot(load(customerId, orderId));
     }
 
     /** Only before anything has been picked up. Releases the hold / refunds the wallet and stops dispatch. */

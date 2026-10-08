@@ -159,24 +159,30 @@ Sign-up also takes `vehicleType` (MOTORCYCLE/SCOOTER/EV_SCOOTER/BICYCLE), `vehic
 | PATCH | `/` | `fullName?, email?, city?` | ✅ |
 | PUT | `/password` | | ✅ |
 | GET | `/documents` | document numbers are masked | ✅ |
-| POST | `/documents/{type}/upload-url` | pre-signed upload URL | 🚧 |
+| POST | `/documents/{type}/upload-url` | `{contentType image/jpeg / image/png / application/pdf}` → `{uploadUrl, fileUrl, expiresAt}`. PUT the raw file to `uploadUrl` (no token, same `Content-Type`, max 10 MB, valid 15 min), then save `fileUrl` with PUT `/documents/{type}` | ✅ |
 | PUT | `/documents/{type}` | `documentNumber?, fileUrl` | ✅ |
 | PUT | `/duty` | `{online}`: APPROVED partners only; can't go offline mid-delivery | ✅ |
 | POST | `/location` | `{location{lat,lng}, headingDegrees?, speedKmph?}`; updates PostGIS point + H3 cell | ✅ |
 
 ### Trips: `/agent`
-| Method | Path | Status |
-|---|---|---|
-| GET | `/offers` | 🚧 |
-| POST | `/offers/{id}/accept` · `/offers/{id}/reject` | 🚧 |
-| GET | `/route` (locked multi-stop route) | 🚧 |
-| POST | `/route/stops/{stopId}/arrived` | 🚧 |
-| POST | `/route/stops/{stopId}/kirana-qr` `{qrPayload}` | 🚧 |
-| POST | `/route/stops/{stopId}/items/{itemId}/deficient` | 🚧 |
-| POST | `/route/stops/{stopId}/picked-up` | 🚧 |
-| POST | `/orders/{orderId}/deliver` `{deliveryOtp}` | 🚧 |
-| POST | `/route/injections/{id}/ack` | 🚧 |
-| GET | `/deliveries` · `/earnings?period=TODAY` · `/earnings/payouts` | 🚧 |
+Approved, online partners only. Offers reach the nearest free rider (H3 cells + distance around the first pickup); each offer is valid for `app.ops.rider-offer-timeout` (30 s), then goes to the next rider.
+| Method | Path | Notes | Status |
+|---|---|---|---|
+| GET | `/offers` | open offers: `[{offerId, orderIds, stops, totalDistanceMeters, estimatedEarnings, expiresAt}]` (also pushed on `/user/queue/route-updates`) | ✅ |
+| POST | `/offers/{id}/accept` | first accept wins; `409 OFFER_NO_LONGER_AVAILABLE` / `409 RIDER_BUSY`. Rider → `ACTIVE`, order → `PICKING`; returns the locked route | ✅ |
+| POST | `/offers/{id}/reject` `{reason?}` | 204; the order goes to the next rider straight away | ✅ |
+| GET | `/route` | `{routeId, locked:true, stops[{stopId, sequence, type, name, address, location, orderIds, items, state, eta}], remainingDistanceMeters, estimatedCompletionAt}`; `404` when no active route | ✅ |
+| POST | `/route/stops/{stopId}/arrived` | | ✅ |
+| POST | `/route/stops/{stopId}/kirana-qr` `{qrPayload}` | Kirana stop: the shop's QR must match (`400 QR_WRONG_STORE` / `QR_INVALID` / `QR_EXPIRED`); captures the payment and records the Kirana's payout | ✅ |
+| POST | `/route/stops/{stopId}/items/{itemId}/deficient` `{reason?}` | `itemId` = the stop item's id; refunds that line to the customer's wallet; if nothing is left the stop is skipped (and a grocery-only order is cancelled) | ✅ |
+| POST | `/route/stops/{stopId}/picked-up` | restaurant stop; records the restaurant's payout | ✅ |
+| POST | `/orders/{orderId}/deliver` `{deliveryOtp}` | 4-digit code from the customer; `400 DELIVERY_OTP_INVALID`. Completes the order, books earnings, frees the rider when the route is empty | ✅ |
+| POST | `/route/injections/{id}/ack` | 204 | ✅ |
+| GET | `/deliveries?page&size` | `{orderId, batched, stops, earnings, completedAt}` | ✅ |
+| GET | `/earnings?period=TODAY/WEEK/MONTH` | Indian time; base ₹30 per order + ₹10 per extra pickup + batching incentives | ✅ |
+| GET | `/earnings/payouts?page&size` | | ✅ |
+
+Stops must be worked in order (Linear Route Locking): acting on any stop but the current one returns `409 STOP_LOCKED`. One order's stops always run Kirana → Restaurant → Customer; a Kirana that claims after the rider accepted is inserted before the restaurant.
 
 ---
 
@@ -241,20 +247,27 @@ There is no admin sign-up. The first admin is created on startup from `ADMIN_EMA
 
 ---
 
+## Files (local storage)
+| Method | Path | Notes | Status |
+|---|---|---|---|
+| PUT | `/files/upload?key&expires&contentType&sig` | public, authorised by the signed link only | ✅ |
+| GET | `/files/{key}` | admins: any file; partners: only their own `agents/{id}/...` | ✅ |
+
 ## Real-time (STOMP over WebSocket)
 - Endpoint: `ws://localhost:8080/ws`. The CONNECT frame must carry the header `Authorization: Bearer <accessToken>`.
 - Rider → server: `SEND /app/agent/location` with the same body as `POST /agent/me/location` ✅
-- Server → customer: subscribe to `/user/queue/tracking`
-- Server → rider: subscribe to `/user/queue/route-updates` (offers, the "+1 stop" injection flash) and `/user/queue/errors`
+- Server → customer: `/user/queue/tracking` gets `{orderId, status, agentLocation, etaMinutes, updatedAt}` on every order status change and every location update of the rider carrying the order ✅
+- Server → rider: `/user/queue/route-updates` gets new offers ✅ and the "+1 stop" injection flash (Phase 10); errors on `/user/queue/errors`
 - Only `/user/...` subscriptions are allowed.
 
-## Internal engines (no HTTP endpoints, all 🚧)
-| Class | Blueprint section |
-|---|---|
-| `dispatch/DispatchOrchestrator` | parallel dispatch, kitchen-delay handling |
-| `dispatch/KiranaBroadcastService` | 5 closest shops within 500 m, 60 s claim timeout, H3 ring expansion, dark-store fallback |
-| `batching/CoLinearBatchingEngine` | 500 m corridor, vector intersection, Δt ≤ 4 min |
-| `routing/OsrmRoutingClient` | road-network routes and travel-time matrix |
-| `spatial/SpatialIndexService` | H3 cells ✅ (resolution 9) |
+## Internal engines (no HTTP endpoints)
+| Class | What it does | Status |
+|---|---|---|
+| `dispatch/DispatchOrchestrator` | reacts to order events after commit (async): starts the broadcast (combined orders wait `kirana-broadcast-combined-delay`, 2 min), offers food orders to the nearest rider at once, grocery-only orders once claimed; inserts late Kirana stops; postpones unstarted broadcasts on kitchen delays; cleans up on cancel | ✅ |
+| `dispatch/KiranaBroadcastService` | 5 nearest open Kiranas within 500 m, 60 s to claim, then the next ring (1 km); after the last round the groceries are `UNFULFILLED` (grocery-only orders are cancelled, combined orders refund the groceries to the wallet) | ✅ |
+| `dispatch/DispatchScheduler` | poller on every instance (`app.dispatch.poll-interval-ms`): opens/expands due broadcast rounds, expires offers, retries orders waiting for a rider; each row in its own transaction with `FOR UPDATE SKIP LOCKED` | ✅ |
+| `batching/CoLinearBatchingEngine` | 500 m corridor, vector intersection, Δt ≤ 4 min | 🚧 |
+| `routing/RoutingClient` | haversine × 1.3 at 20 km/h by default; OSRM behind the `osrm` profile | ✅ / 🚧 |
+| `spatial/SpatialIndexService` | H3 cells (resolution 9) and the disk covering a radius | ✅ |
 
 The blueprint constants (2 km radius, 500 m corridor, 4 min, 60 s, ₹150, ₹15) live under `app.ops.*` in `application.properties`.
