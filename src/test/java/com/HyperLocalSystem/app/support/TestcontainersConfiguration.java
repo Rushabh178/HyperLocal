@@ -1,8 +1,10 @@
 package com.HyperLocalSystem.app.support;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
+import org.springframework.messaging.SubscribableChannel;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -25,5 +27,12 @@ public class TestcontainersConfiguration {
     @Bean
     CapturingOtpSender capturingOtpSender() {
         return new CapturingOtpSender();
+    }
+
+    @Bean
+    MessageCapture messageCapture(@Qualifier("brokerChannel") SubscribableChannel brokerChannel) {
+        MessageCapture capture = new MessageCapture();
+        brokerChannel.subscribe(capture);
+        return capture;
     }
 }

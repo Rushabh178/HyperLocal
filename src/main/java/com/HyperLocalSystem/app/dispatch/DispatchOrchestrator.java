@@ -1,22 +1,22 @@
 package com.HyperLocalSystem.app.dispatch;
 
-import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.RouteInjectionNotice;
 import com.HyperLocalSystem.app.agent.entity.DeliveryAgent;
 import com.HyperLocalSystem.app.batching.CoLinearBatchingEngine;
-import com.HyperLocalSystem.app.batching.CoLinearBatchingEngine.RouteInjectedEvent;
 import com.HyperLocalSystem.app.agent.entity.DutyStatus;
 import com.HyperLocalSystem.app.agent.repository.DeliveryAgentRepository;
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
 import com.HyperLocalSystem.app.common.geo.GeoUtils;
 import com.HyperLocalSystem.app.common.model.StopType;
 import com.HyperLocalSystem.app.config.AppProperties;
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.OfferWithdrawnEvent;
 import com.HyperLocalSystem.app.dispatch.DispatchEvents.RiderNeededEvent;
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.RouteChangedEvent;
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.WithdrawReason;
 import com.HyperLocalSystem.app.dispatch.DispatchEvents.TaskOfferCreatedEvent;
 import com.HyperLocalSystem.app.dispatch.entity.RiderRoute;
 import com.HyperLocalSystem.app.dispatch.entity.RouteStop;
 import com.HyperLocalSystem.app.dispatch.entity.TaskOffer;
 import com.HyperLocalSystem.app.dispatch.repository.RiderRouteRepository;
-import com.HyperLocalSystem.app.dispatch.repository.RouteInjectionRepository;
 import com.HyperLocalSystem.app.dispatch.repository.RouteStopRepository;
 import com.HyperLocalSystem.app.dispatch.repository.TaskOfferRepository;
 import com.HyperLocalSystem.app.merchant.repository.MerchantRepository;
@@ -28,7 +28,6 @@ import com.HyperLocalSystem.app.order.event.OrderEvents.KitchenDelayedEvent;
 import com.HyperLocalSystem.app.order.event.OrderEvents.OrderCancelledEvent;
 import com.HyperLocalSystem.app.order.event.OrderEvents.OrderConfirmedEvent;
 import com.HyperLocalSystem.app.order.repository.UnifiedOrderRepository;
-import com.HyperLocalSystem.app.realtime.RealtimePublisher;
 import com.HyperLocalSystem.app.routing.RoutingClient;
 import com.HyperLocalSystem.app.spatial.SpatialIndexService;
 import lombok.RequiredArgsConstructor;
@@ -64,11 +63,9 @@ public class DispatchOrchestrator {
     private final RouteStopRepository stops;
     private final KiranaBroadcastService broadcastService;
     private final CoLinearBatchingEngine batchingEngine;
-    private final RouteInjectionRepository injections;
     private final RoutePlanner routePlanner;
     private final SpatialIndexService spatialIndex;
     private final RoutingClient routingClient;
-    private final RealtimePublisher realtime;
     private final AppProperties properties;
     private final ApplicationEventPublisher events;
 
@@ -121,12 +118,14 @@ public class DispatchOrchestrator {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void onOrderCancelled(OrderCancelledEvent event) {
-        taskOffers.cancelOpenForOrder(event.orderId());
+        taskOffers.withdrawOpen(event.orderId()).forEach(offer -> events.publishEvent(
+                new OfferWithdrawnEvent(offer.getId(), offer.getAgentId(), offer.getOrderId(), WithdrawReason.CANCELLED)));
         broadcastService.cancelFor(event.orderId());
         RoutePlanner.skipRemaining(stops.findByOrderIdOrderBySequence(event.orderId()));
         if (event.deliveryAgentId() != null) {
             stops.flush();
             completeRouteIfDone(event.deliveryAgentId());
+            events.publishEvent(new RouteChangedEvent(event.deliveryAgentId()));
         }
     }
 
@@ -135,27 +134,6 @@ public class DispatchOrchestrator {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void onRiderNeeded(RiderNeededEvent event) {
         orders.findById(event.orderId()).ifPresent(this::offerNextRider);
-    }
-
-    /** The "+1 stop" haptic flash with the rider's updated route. */
-    @Async
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
-    public void onRouteInjected(RouteInjectedEvent event) {
-        injections.findById(event.injectionId()).ifPresent(injection -> routes.findById(injection.getRouteId()).ifPresent(route -> {
-            var notice = new RouteInjectionNotice(injection.getId(),
-                    "Route Optimized: +1 Stop added nearby (+₹" + injection.getBonus().stripTrailingZeros().toPlainString() + " earned)",
-                    injection.getBonus(), routePlanner.toResponse(route, stops.findByRouteIdOrderBySequence(route.getId())));
-            realtime.sendRouteInjection(event.agentId(), notice);
-        }));
-    }
-
-    @Async
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
-    public void onOfferCreated(TaskOfferCreatedEvent event) {
-        taskOffers.findById(event.offerId())
-                .ifPresent(offer -> realtime.sendOffer(event.agentId(), routePlanner.toOfferDto(offer)));
     }
 
     // ----------------------------------------------------------------- dispatch
@@ -232,6 +210,7 @@ public class DispatchOrchestrator {
         routeStops.sort((a, b) -> Integer.compare(a.getSequence(), b.getSequence()));
         routePlanner.refreshEtas(route.getAgentId(), routeStops);
         route.setUpdatedAt(Instant.now());
+        events.publishEvent(new RouteChangedEvent(route.getAgentId()));
         // TODO(edge-case): if the food was already picked up, hot items now wait while the rider goes to the Kirana.
     }
 

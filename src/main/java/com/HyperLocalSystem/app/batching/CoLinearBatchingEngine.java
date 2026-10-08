@@ -8,6 +8,8 @@ import com.HyperLocalSystem.app.batching.CoLinearBatchingAlgorithm.Point;
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
 import com.HyperLocalSystem.app.common.geo.GeoUtils;
 import com.HyperLocalSystem.app.config.AppProperties;
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.OfferWithdrawnEvent;
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.WithdrawReason;
 import com.HyperLocalSystem.app.dispatch.RoutePlanner;
 import com.HyperLocalSystem.app.dispatch.entity.RiderRoute;
 import com.HyperLocalSystem.app.dispatch.entity.RouteInjection;
@@ -169,7 +171,8 @@ public class CoLinearBatchingEngine {
         route.setUpdatedAt(Instant.now());
 
         UUID primaryOrderId = remaining.getFirst().getOrderId();
-        taskOffers.cancelOpenForOrder(order.getId());
+        taskOffers.withdrawOpen(order.getId()).forEach(offer -> events.publishEvent(
+                new OfferWithdrawnEvent(offer.getId(), offer.getAgentId(), offer.getOrderId(), WithdrawReason.TAKEN)));
         order.setDeliveryAgentId(agentId);
         order.setBatched(true);
         order.setParentBatchId(primaryOrderId);

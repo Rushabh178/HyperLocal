@@ -189,6 +189,11 @@ public class RoutePlanner {
                 .collect(Collectors.groupingBy(OrderItem::getOrderId));
     }
 
+    /** What a rider without an active route sees. */
+    public static ActiveRouteResponse emptyRoute() {
+        return new ActiveRouteResponse(null, true, List.of(), 0, null);
+    }
+
     /** Marks every unfinished stop of an order SKIPPED (cancellation, nothing left to pick up). */
     public static void skipRemaining(List<RouteStop> orderStops) {
         orderStops.stream().filter(stop -> !stop.isDone()).forEach(stop -> stop.setState(StopState.SKIPPED));

@@ -1,32 +1,27 @@
 package com.HyperLocalSystem.app.realtime;
 
-import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.RouteInjectionNotice;
-import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.TaskOffer;
-import com.HyperLocalSystem.app.order.dto.OrderDtos.TrackingResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
 
-/** Server → app pushes. User destinations are keyed by the JWT subject (customer_id / agent_id). */
+/**
+ * Server → app WebSocket pushes, always wrapped in {@link RealtimeMessage}. User destinations are
+ * keyed by the JWT subject (customer_id / agent_id / merchant_id). Callers go through
+ * {@code notification.Notifier}, which also sends the matching push notification.
+ */
 @Component
 @RequiredArgsConstructor
 public class RealtimePublisher {
 
+    public static final String CUSTOMER_QUEUE = "/queue/tracking";
+    public static final String RIDER_QUEUE = "/queue/route-updates";
+    public static final String MERCHANT_QUEUE = "/queue/merchant-events";
+
     private final SimpMessagingTemplate messaging;
 
-    public void sendTracking(UUID customerId, TrackingResponse update) {
-        messaging.convertAndSendToUser(customerId.toString(), "/queue/tracking", update);
-    }
-
-    /** A new order offer for an AVAILABLE rider (they can also poll GET /agent/offers). */
-    public void sendOffer(UUID agentId, TaskOffer offer) {
-        messaging.convertAndSendToUser(agentId.toString(), "/queue/route-updates", offer);
-    }
-
-    /** Triggers the "Haptic Injection Flash" in the rider app. */
-    public void sendRouteInjection(UUID agentId, RouteInjectionNotice notice) {
-        messaging.convertAndSendToUser(agentId.toString(), "/queue/route-updates", notice);
+    public void send(UUID userId, String queue, RealtimeMessage message) {
+        messaging.convertAndSendToUser(userId.toString(), queue, message);
     }
 }

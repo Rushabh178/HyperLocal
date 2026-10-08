@@ -277,10 +277,52 @@ There is no admin sign-up. The first admin is created on startup from `ADMIN_EMA
 
 ## Real-time (STOMP over WebSocket)
 - Endpoint: `ws://localhost:8080/ws`. The CONNECT frame must carry the header `Authorization: Bearer <accessToken>`.
-- Rider → server: `SEND /app/agent/location` with the same body as `POST /agent/me/location` ✅
-- Server → customer: `/user/queue/tracking` gets `{orderId, status, agentLocation, etaMinutes, updatedAt}` on every order status change and every location update of the rider carrying the order ✅
-- Server → rider: `/user/queue/route-updates` gets new offers and the "+1 stop" injection flash `{injectionId, message, bonusAmount, updatedRoute}` ✅; errors on `/user/queue/errors`
-- Only `/user/...` subscriptions are allowed.
+- Only `/user/...` subscriptions are allowed; each app subscribes to its own queue:
+
+| App | Subscribe to | Types |
+|---|---|---|
+| Customer | `/user/queue/tracking` | `ORDER_STATUS`, `RIDER_LOCATION`, `STOPS_UPDATED`, `PAYMENT_CONFIRMED`, `PAYMENT_FAILED` |
+| Rider | `/user/queue/route-updates` | `OFFER`, `OFFER_WITHDRAWN`, `STOP_ADDED`, `ROUTE_UPDATED` |
+| Merchant | `/user/queue/merchant-events` | `NEW_ORDER`, `ORDER_CANCELLED`, `BROADCAST_OFFER`, `BROADCAST_TAKEN`, `RIDER_ARRIVING`, `ORDER_PICKED_UP` |
+
+- Rider → server: `SEND /app/agent/location` with the same body as `POST /agent/me/location`; errors come back on `/user/queue/errors`.
+
+### Envelope
+Every message on every queue has the same shape; switch on `type`, read `data`:
+```json
+{ "type": "OFFER", "sentAt": "2026-10-08T13:20:00Z", "data": { ... } }
+```
+
+### Customer messages (`/user/queue/tracking`)
+`ORDER_STATUS`: sent on every status change; `data` is the full tracking snapshot (same as `GET /customer/orders/{id}/tracking`).
+```json
+{ "type": "ORDER_STATUS", "sentAt": "2026-10-08T13:20:00Z",
+  "data": { "orderId": "6f1c…", "status": "PICKING", "agentLocation": { "lat": 18.5204, "lng": 73.8567 },
+            "etaMinutes": 14, "updatedAt": "2026-10-08T13:20:00Z" } }
+```
+`RIDER_LOCATION`: every time the rider carrying the order sends a location.
+```json
+{ "type": "RIDER_LOCATION", "sentAt": "…", "data": { "orderId": "6f1c…", "location": { "lat": 18.5211, "lng": 73.8570 }, "etaMinutes": 12, "updatedAt": "…" } }
+```
+
+### Rider messages (`/user/queue/route-updates`)
+`OFFER`: `data` is the same object as an item of `GET /agent/offers`.
+```json
+{ "type": "OFFER", "sentAt": "…",
+  "data": { "offerId": "a3e0…", "orderIds": ["6f1c…"], "stops": [ … ], "totalDistanceMeters": 2140,
+            "estimatedEarnings": 40.00, "expiresAt": "2026-10-08T13:20:30Z" } }
+```
+`OFFER_WITHDRAWN`: remove the offer card. `reason` is `EXPIRED`, `TAKEN` (batched into another rider's route) or `CANCELLED` (order cancelled).
+```json
+{ "type": "OFFER_WITHDRAWN", "sentAt": "…", "data": { "offerId": "a3e0…", "orderId": "6f1c…", "reason": "EXPIRED" } }
+```
+`STOP_ADDED`: a batching injection; play the haptic flash.
+```json
+{ "type": "STOP_ADDED", "sentAt": "…",
+  "data": { "injectionId": "c19d…", "message": "Route Optimized: +1 Stop added nearby (+₹15 earned)", "bonusAmount": 15.00,
+            "updatedRoute": { "routeId": "…", "locked": true, "stops": [ … ], "remainingDistanceMeters": 1830, "estimatedCompletionAt": "…" } } }
+```
+`ROUTE_UPDATED`: the route changed without the rider acting (late Kirana stop, cancelled order); `data` is the same as `GET /agent/route` (empty `stops` when the route is finished).
 
 ## Internal engines (no HTTP endpoints)
 | Class | What it does | Status |

@@ -15,4 +15,14 @@ public final class DispatchEvents {
     /** Push the new offer to the rider's app. */
     public record TaskOfferCreatedEvent(UUID offerId, UUID agentId) {
     }
+
+    public enum WithdrawReason { EXPIRED, TAKEN, CANCELLED }
+
+    /** The rider's open offer is gone; the app removes the offer card. */
+    public record OfferWithdrawnEvent(UUID offerId, UUID agentId, UUID orderId, WithdrawReason reason) {
+    }
+
+    /** The rider's route changed without them doing anything (late Kirana stop, cancelled order). */
+    public record RouteChangedEvent(UUID agentId) {
+    }
 }

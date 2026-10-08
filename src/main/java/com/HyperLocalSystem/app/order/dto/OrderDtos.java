@@ -70,6 +70,10 @@ public final class OrderDtos {
     public record TrackingResponse(UUID orderId, OrderStatus status, GeoPoint agentLocation, Integer etaMinutes, Instant updatedAt) {
     }
 
+    /** RIDER_LOCATION message: where the rider is and how far this order is. */
+    public record RiderLocation(UUID orderId, GeoPoint location, Integer etaMinutes, Instant updatedAt) {
+    }
+
     public record CancelOrderRequest(@NotBlank @Size(max = 250) String reason) {
     }
 

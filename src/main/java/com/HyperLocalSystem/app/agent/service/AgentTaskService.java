@@ -380,7 +380,7 @@ public class AgentTaskService {
         stops.flush();
         RiderRoute route = routes.findByAgentIdAndStatus(agentId, RiderRoute.Status.ACTIVE).orElse(null);
         if (route == null) {
-            return new ActiveRouteResponse(null, true, List.of(), 0, null);
+            return RoutePlanner.emptyRoute();
         }
         List<RouteStop> routeStops = stops.findByRouteIdOrderBySequence(route.getId());
         routePlanner.refreshEtas(agentId, routeStops);

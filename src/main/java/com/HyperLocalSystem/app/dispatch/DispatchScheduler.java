@@ -1,9 +1,13 @@
 package com.HyperLocalSystem.app.dispatch;
 
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.OfferWithdrawnEvent;
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.WithdrawReason;
+import com.HyperLocalSystem.app.dispatch.entity.TaskOffer;
 import com.HyperLocalSystem.app.dispatch.repository.BroadcastOfferRepository;
 import com.HyperLocalSystem.app.dispatch.repository.TaskOfferRepository;
 import com.HyperLocalSystem.app.order.repository.UnifiedOrderRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -36,10 +40,13 @@ public class DispatchScheduler {
     private final KiranaBroadcastService broadcastService;
     private final DispatchOrchestrator dispatch;
     private final TransactionTemplate tx;
+    private final ApplicationEventPublisher events;
 
     public DispatchScheduler(BroadcastOfferRepository broadcastOffers, TaskOfferRepository taskOffers,
                              UnifiedOrderRepository orders, KiranaBroadcastService broadcastService,
-                             DispatchOrchestrator dispatch, PlatformTransactionManager transactionManager) {
+                             DispatchOrchestrator dispatch, PlatformTransactionManager transactionManager,
+                             ApplicationEventPublisher events) {
+        this.events = events;
         this.broadcastOffers = broadcastOffers;
         this.taskOffers = taskOffers;
         this.orders = orders;
@@ -55,7 +62,10 @@ public class DispatchScheduler {
             inTransaction("broadcast round " + offerId,
                     () -> broadcastOffers.lockIfDue(offerId, now).ifPresent(broadcastService::advance));
         }
-        inTransaction("expire rider offers", () -> taskOffers.expireDue(now));
+        inTransaction("expire rider offers", () -> taskOffers.lockExpired(now, BATCH).forEach(offer -> {
+            offer.setStatus(TaskOffer.Status.EXPIRED);
+            events.publishEvent(new OfferWithdrawnEvent(offer.getId(), offer.getAgentId(), offer.getOrderId(), WithdrawReason.EXPIRED));
+        }));
         for (UUID orderId : orders.findIdsAwaitingRider(BATCH)) {
             inTransaction("dispatch order " + orderId,
                     () -> orders.lockIfAwaitingRider(orderId).ifPresent(dispatch::dispatch));
