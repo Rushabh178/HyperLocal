@@ -9,6 +9,7 @@ import com.HyperLocalSystem.app.customer.dto.CustomerDtos.AddressResponse;
 import com.HyperLocalSystem.app.order.entity.OrderStatus;
 import com.HyperLocalSystem.app.payment.dto.PaymentDtos.PaymentHoldResponse;
 import com.HyperLocalSystem.app.payment.entity.PaymentMethod;
+import com.HyperLocalSystem.app.payment.entity.PaymentStatus;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -28,11 +29,21 @@ public final class OrderDtos {
     /** Converts the current cart into one order. Send an {@code Idempotency-Key} header to make retries safe. */
     public record CheckoutRequest(
             @NotNull UUID addressId,
-            @NotNull PaymentMethod paymentMethod,
-            @Size(max = 100) String upiVpa) {
+            @NotNull PaymentMethod paymentMethod) {
     }
 
-    public record CheckoutResponse(UUID orderId, OrderStatus status, BigDecimal payableAmount, PaymentHoldResponse payment) {
+    /**
+     * {@code upiIntentUrl}: open it in the UPI app. Null when there is nothing to approve (already
+     * CONFIRMED by the fake gateway or a wallet payment) or the hold failed; then wait for
+     * PAYMENT_CONFIRMED / PAYMENT_FAILED on /user/queue/tracking or poll GET /orders/{id}.
+     */
+    public record CheckoutResponse(UUID orderId, OrderStatus status, BigDecimal payableAmount, String upiIntentUrl,
+                                   PaymentHoldResponse payment) {
+    }
+
+    /** Data of PAYMENT_CONFIRMED / PAYMENT_FAILED. */
+    public record PaymentUpdate(UUID orderId, UUID paymentId, PaymentStatus paymentStatus, OrderStatus orderStatus,
+                                BigDecimal amount, String message) {
     }
 
     public record OrderSummary(

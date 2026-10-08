@@ -60,7 +60,7 @@ public class RazorpayPaymentGateway implements PaymentGateway {
     }
 
     @Override
-    public HoldResult createHold(UUID paymentId, BigDecimal amount, String upiVpa) {
+    public HoldResult createHold(UUID paymentId, BigDecimal amount) {
         JsonNode order = client.post().uri("/orders").contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of("amount", paise(amount), "currency", "INR", "receipt", paymentId.toString(), "payment_capture", 0))
                 .retrieve().body(JsonNode.class);

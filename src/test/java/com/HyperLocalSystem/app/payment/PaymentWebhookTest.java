@@ -25,7 +25,7 @@ class PaymentWebhookTest extends IntegrationTest {
         Session customer = signUpCustomer();
         String home = addAddress(customer.token(), point(0, 0));
 
-        // "@pending" makes the fake gateway wait for a webhook, like a real UPI app approval.
+        // X-Fake-Payment: PENDING makes the fake gateway wait for a webhook, like a real UPI app approval.
         String orderId = pendingOrder(customer, restaurant.id(), dish, home);
         String payment = get("/api/v1/payments/orders/" + orderId, customer.token());
         assertThat((String) read(payment, "$.status")).isEqualTo("HOLD_PENDING");
@@ -59,8 +59,8 @@ class PaymentWebhookTest extends IntegrationTest {
     private String pendingOrder(Session customer, UUID restaurantId, String dish, String addressId) throws Exception {
         post("/api/v1/customer/cart/items", customer.token(),
                 "{\"itemType\":\"FOOD\",\"itemId\":\"%s\",\"restaurantId\":\"%s\",\"quantity\":1}".formatted(dish, restaurantId));
-        String checkout = call(HttpMethod.POST, "/api/v1/customer/orders/checkout", customer.token(),
-                "{\"addressId\":\"%s\",\"paymentMethod\":\"UPI\",\"upiVpa\":\"me%s\"}".formatted(addressId, FakePaymentGateway.PENDING_SUFFIX), 201);
+        String checkout = postWithHeader("/api/v1/customer/orders/checkout", customer.token(),
+                "{\"addressId\":\"%s\",\"paymentMethod\":\"UPI\"}".formatted(addressId), FakePaymentGateway.OUTCOME_HEADER, "PENDING", 201);
         assertThat((String) read(checkout, "$.status")).isEqualTo("PENDING");
         return read(checkout, "$.orderId");
     }

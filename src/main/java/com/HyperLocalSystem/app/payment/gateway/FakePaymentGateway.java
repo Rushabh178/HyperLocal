@@ -4,8 +4,12 @@ import com.HyperLocalSystem.app.config.AppProperties;
 import com.HyperLocalSystem.app.payment.entity.PaymentStatus;
 import com.HyperLocalSystem.app.security.Hashing;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -16,28 +20,37 @@ import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.Locale;
 import java.util.UUID;
 
 /**
- * DEVELOPMENT ONLY. Holds are approved immediately, except for a UPI id ending in {@code @pending}
- * (like a payment provider's magic test card), whose hold waits for a webhook. Capture / release /
- * refund just log. Webhooks are {@code {"eventId","reference","type"}} signed with
- * HMAC-SHA256(app.payment.webhook-secret), hex, in the X-Signature header.
+ * DEVELOPMENT GATEWAY (whenever "razorpay" is off). The outcome of a hold is
+ * {@code payments.fake.default-outcome} (SUCCESS), and in the "dev" profile a request can pick it
+ * with the header {@code X-Fake-Payment: SUCCESS | PENDING | FAIL}; outside dev the header is ignored.
+ * PENDING waits for a webhook {@code {"eventId","reference","type"}} signed with
+ * HMAC-SHA256(app.payment.webhook-secret), hex, in the X-Signature header. Capture / release /
+ * refund just log.
  */
 @Slf4j
 @Component
 @Profile("!razorpay")
 public class FakePaymentGateway implements PaymentGateway {
 
-    /** UPI ids ending with this keep the hold pending, so the webhook path can be tested. */
-    public static final String PENDING_SUFFIX = "@pending";
+    public static final String OUTCOME_HEADER = "X-Fake-Payment";
+
+    public enum Outcome { SUCCESS, PENDING, FAIL }
 
     private final AppProperties properties;
     private final ObjectMapper objectMapper;
+    private final Outcome defaultOutcome;
+    private final boolean headerAllowed;
 
-    public FakePaymentGateway(AppProperties properties, ObjectMapper objectMapper) {
+    public FakePaymentGateway(AppProperties properties, ObjectMapper objectMapper, Environment environment,
+                              @Value("${payments.fake.default-outcome:SUCCESS}") Outcome defaultOutcome) {
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.defaultOutcome = defaultOutcome;
+        this.headerAllowed = environment.matchesProfiles("dev");
     }
 
     @Override
@@ -46,13 +59,32 @@ public class FakePaymentGateway implements PaymentGateway {
     }
 
     @Override
-    public HoldResult createHold(UUID paymentId, BigDecimal amount, String upiVpa) {
+    public HoldResult createHold(UUID paymentId, BigDecimal amount) {
         String reference = "fake_hold_" + paymentId.toString().replace("-", "");
         String intent = "upi://pay?pa=hyperlocal@fakebank&pn=HyperLocal&am=%s&cu=INR&tr=%s".formatted(amount.toPlainString(), reference);
-        boolean waitForWebhook = upiVpa != null && upiVpa.endsWith(PENDING_SUFFIX);
-        log.info("[FAKE PAYMENT] hold {} for ₹{} {}", reference, amount, waitForWebhook ? "pending until webhook" : "auto-approved");
-        return new HoldResult(reference, waitForWebhook ? PaymentStatus.HOLD_PENDING : PaymentStatus.HELD, intent,
-                Instant.now().plus(properties.payment().holdTtl()));
+        Outcome outcome = outcome();
+        log.info("[FAKE PAYMENT] hold {} for ₹{}: {}", reference, amount, outcome);
+        PaymentStatus status = switch (outcome) {
+            case SUCCESS -> PaymentStatus.HELD;
+            case PENDING -> PaymentStatus.HOLD_PENDING;
+            case FAIL -> PaymentStatus.FAILED;
+        };
+        return new HoldResult(reference, status, intent, Instant.now().plus(properties.payment().holdTtl()));
+    }
+
+    /** The X-Fake-Payment header of the current request (dev profile only), else the configured default. */
+    private Outcome outcome() {
+        if (headerAllowed && RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes request) {
+            String header = request.getRequest().getHeader(OUTCOME_HEADER);
+            if (header != null && !header.isBlank()) {
+                try {
+                    return Outcome.valueOf(header.trim().toUpperCase(Locale.ROOT));
+                } catch (IllegalArgumentException e) {
+                    log.warn("[FAKE PAYMENT] unknown {} value '{}', using {}", OUTCOME_HEADER, header, defaultOutcome);
+                }
+            }
+        }
+        return defaultOutcome;
     }
 
     @Override

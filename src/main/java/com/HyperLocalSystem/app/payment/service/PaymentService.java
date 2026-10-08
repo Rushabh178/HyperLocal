@@ -1,6 +1,8 @@
 package com.HyperLocalSystem.app.payment.service;
 
 import com.HyperLocalSystem.app.common.exception.ApiException;
+import com.HyperLocalSystem.app.payment.PaymentEvents.PaymentConfirmedEvent;
+import com.HyperLocalSystem.app.payment.PaymentEvents.PaymentFailedEvent;
 import com.HyperLocalSystem.app.payment.dto.PaymentDtos.PaymentHoldResponse;
 import com.HyperLocalSystem.app.payment.entity.MerchantSettlement;
 import com.HyperLocalSystem.app.payment.entity.Payment;
@@ -11,6 +13,7 @@ import com.HyperLocalSystem.app.payment.repository.MerchantSettlementRepository;
 import com.HyperLocalSystem.app.payment.repository.PaymentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,13 +37,14 @@ public class PaymentService {
     private final MerchantSettlementRepository settlements;
     private final PaymentGateway gateway;
     private final WalletService walletService;
+    private final ApplicationEventPublisher events;
 
     /**
      * Called by checkout. UPI: creates the hold (the fake gateway approves it at once, a real one
      * confirms via webhook). WALLET: debits the wallet and captures immediately.
      */
     @Transactional
-    public Payment start(UUID orderId, UUID customerId, BigDecimal amount, PaymentMethod method, String upiVpa) {
+    public Payment start(UUID orderId, UUID customerId, BigDecimal amount, PaymentMethod method) {
         Payment payment = new Payment();
         payment.setOrderId(orderId);
         payment.setCustomerId(customerId);
@@ -53,18 +57,32 @@ public class PaymentService {
             payment.moveTo(PaymentStatus.HELD);
             payment.moveTo(PaymentStatus.CAPTURED);
             payment.setCapturedAmount(amount);
+            events.publishEvent(new PaymentConfirmedEvent(payment.getId(), orderId));
             return payment;
         }
         payment.setGateway(gateway.name());
         payments.saveAndFlush(payment);
-        PaymentGateway.HoldResult hold = gateway.createHold(payment.getId(), amount, upiVpa);
+        applyHold(payment, gateway.createHold(payment.getId(), amount));
+        return payment;
+    }
+
+    /** Stores the gateway's answer; an immediate approval or decline is announced to the customer. */
+    private void applyHold(Payment payment, PaymentGateway.HoldResult hold) {
         payment.setGatewayReference(hold.reference());
         payment.setUpiIntentUrl(hold.upiIntentUrl());
         payment.setExpiresAt(hold.expiresAt());
-        if (hold.status() == PaymentStatus.HELD) {
-            payment.moveTo(PaymentStatus.HELD);
+        switch (hold.status()) {
+            case HELD -> {
+                payment.moveTo(PaymentStatus.HELD);
+                events.publishEvent(new PaymentConfirmedEvent(payment.getId(), payment.getOrderId()));
+            }
+            case FAILED -> {
+                payment.moveTo(PaymentStatus.FAILED);
+                events.publishEvent(new PaymentFailedEvent(payment.getId(), payment.getOrderId()));
+            }
+            default -> {
+            }
         }
-        return payment;
     }
 
     /**
@@ -80,14 +98,8 @@ public class PaymentService {
             throw ApiException.conflict("HOLD_NOT_RETRYABLE", "Only a failed UPI payment can be retried");
         }
         payment.moveTo(PaymentStatus.HOLD_PENDING);
-        PaymentGateway.HoldResult hold = gateway.createHold(payment.getId(), payment.getAmount(), null);
-        payment.setGatewayReference(hold.reference());
         payment.setGatewayPaymentId(null);
-        payment.setUpiIntentUrl(hold.upiIntentUrl());
-        payment.setExpiresAt(hold.expiresAt());
-        if (hold.status() == PaymentStatus.HELD) {
-            payment.moveTo(PaymentStatus.HELD);
-        }
+        applyHold(payment, gateway.createHold(payment.getId(), payment.getAmount()));
         return payment;
     }
 
@@ -112,9 +124,13 @@ public class PaymentService {
         switch (event.type()) {
             case HOLD_CONFIRMED -> {
                 payment.moveTo(PaymentStatus.HELD);
+                events.publishEvent(new PaymentConfirmedEvent(payment.getId(), payment.getOrderId()));
                 return Optional.of(payment);
             }
-            case HOLD_FAILED -> payment.moveTo(PaymentStatus.FAILED);
+            case HOLD_FAILED -> {
+                payment.moveTo(PaymentStatus.FAILED);
+                events.publishEvent(new PaymentFailedEvent(payment.getId(), payment.getOrderId()));
+            }
             case IGNORED -> {
             }
         }

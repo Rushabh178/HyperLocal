@@ -16,12 +16,14 @@ public interface PaymentGateway {
     String name();
 
     /**
-     * @param status HELD when the gateway confirms synchronously (fake), else HOLD_PENDING until the webhook
+     * @param status HELD when the gateway confirms synchronously, FAILED when it declines at once,
+     *               else HOLD_PENDING until the webhook
      */
     record HoldResult(String reference, PaymentStatus status, String upiIntentUrl, Instant expiresAt) {
     }
 
-    HoldResult createHold(UUID paymentId, BigDecimal amount, String upiVpa);
+    /** UPI intent flow only (no collect / VPA): the app opens {@code upiIntentUrl} while the hold is pending. */
+    HoldResult createHold(UUID paymentId, BigDecimal amount);
 
     /**
      * Takes (part of) the held amount. {@code reference} is the payment's gateway payment id when the

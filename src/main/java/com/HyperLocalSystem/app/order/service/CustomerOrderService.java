@@ -42,6 +42,7 @@ import com.HyperLocalSystem.app.order.repository.OrderItemRepository;
 import com.HyperLocalSystem.app.order.repository.OrderRatingRepository;
 import com.HyperLocalSystem.app.order.repository.UnifiedOrderRepository;
 import com.HyperLocalSystem.app.payment.entity.Payment;
+import com.HyperLocalSystem.app.payment.entity.PaymentStatus;
 import com.HyperLocalSystem.app.payment.repository.PaymentRepository;
 import com.HyperLocalSystem.app.payment.service.PaymentService;
 import com.HyperLocalSystem.app.security.Hashing;
@@ -128,13 +129,13 @@ public class CustomerOrderService {
         cart.groceries().forEach(line -> lines.add(toOrderItem(order.getId(), line)));
         orderItems.saveAll(lines);
 
-        Payment payment = paymentService.start(order.getId(), customerId, bill.total(), request.paymentMethod(), request.upiVpa());
+        Payment payment = paymentService.start(order.getId(), customerId, bill.total(), request.paymentMethod());
         if (payment.isSecured()) {
             lifecycle.confirm(order);
         }
         cartService.clear(customerId);
         events.publishEvent(new OrderPlacedEvent(order.getId(), customerId));
-        return new CheckoutResponse(order.getId(), order.getStatus(), order.getFinancialTotal(), PaymentService.toResponse(payment));
+        return toCheckoutResponse(order, payment);
     }
 
     @Transactional(readOnly = true)
@@ -272,8 +273,13 @@ public class CustomerOrderService {
     }
 
     private CheckoutResponse toCheckoutResponse(UnifiedOrder order) {
-        Payment payment = payments.findByOrderId(order.getId()).orElseThrow(() -> ApiException.notFound("Payment"));
-        return new CheckoutResponse(order.getId(), order.getStatus(), order.getFinancialTotal(), PaymentService.toResponse(payment));
+        return toCheckoutResponse(order, payments.findByOrderId(order.getId()).orElseThrow(() -> ApiException.notFound("Payment")));
+    }
+
+    /** The intent link only while there is a hold to approve. */
+    private static CheckoutResponse toCheckoutResponse(UnifiedOrder order, Payment payment) {
+        String intent = payment.getStatus() == PaymentStatus.HOLD_PENDING ? payment.getUpiIntentUrl() : null;
+        return new CheckoutResponse(order.getId(), order.getStatus(), order.getFinancialTotal(), intent, PaymentService.toResponse(payment));
     }
 
     private OrderDetail toDetail(UnifiedOrder order) {

@@ -22,7 +22,7 @@ Needs Java 25+, PostgreSQL with PostGIS, and (for tests) Docker.
 | `FIREBASE_CREDENTIALS` | with `fcm` | application-default credentials | path to the Firebase service-account JSON |
 | `STORAGE_DIR` / `PUBLIC_BASE_URL` | no | `./uploads` / `http://localhost:8080` | local file storage for KYC uploads |
 
-Profiles (`SPRING_PROFILES_ACTIVE`): none = fake payment gateway, haversine routing, local file storage; `razorpay` = Razorpay gateway; `osrm` = OSRM routing; `fcm` = real push notifications (otherwise they are logged).
+Profiles (`SPRING_PROFILES_ACTIVE`): when none is set, `dev` is active (fake payment gateway that honours `X-Fake-Payment`, logged pushes, haversine routing, local file storage). Setting any profile (e.g. `prod,razorpay,fcm`) turns `dev` off; `razorpay` = Razorpay gateway; `osrm` = OSRM routing; `fcm` = real push notifications (otherwise they are logged).
 
 ### Conventions
 - **Money** is rupees as a JSON number with exactly two decimals, always computed by the server: `"deliveryFee": 25.00`. Show it as is; the apps never calculate money. (Ratings are plain numbers like `4.5`.)
@@ -178,7 +178,7 @@ Nudge: a grocery-only cart under ₹150 gets `{groceryTotal, threshold, message,
 ### Orders: `/customer/orders`
 | Method | Path | Notes | Status |
 |---|---|---|---|
-| POST | `/checkout` `{addressId, paymentMethod UPI/WALLET, upiVpa?}` + optional `Idempotency-Key` header | → 201 `{orderId, status, payableAmount, payment}`. Re-validates and re-prices the cart, freezes it into an order, takes the payment, clears the cart. Same key again returns the first order. Errors: `400 CART_EMPTY`, `400 ADDRESS_NOT_SERVICEABLE`, `409 ITEM_UNAVAILABLE`, `409 STORE_CLOSED`, `409 INSUFFICIENT_WALLET_BALANCE` | ✅ |
+| POST | `/checkout` `{addressId, paymentMethod UPI/WALLET}` + optional `Idempotency-Key` header | → 201 `{orderId, status, payableAmount, upiIntentUrl, payment}` (see "Paying" below). Re-validates and re-prices the cart, freezes it into an order, takes the payment, clears the cart. Same key again returns the first order. Errors: `400 CART_EMPTY`, `400 ADDRESS_NOT_SERVICEABLE`, `409 ITEM_UNAVAILABLE`, `409 STORE_CLOSED`, `409 INSUFFICIENT_WALLET_BALANCE` | ✅ |
 | GET | `/?status&page&size` | newest first | ✅ |
 | GET | `/{id}` | items, `bill` (after refunds), `missingItems`, address, `rider`, `deliveryOtp` (4 digits, shown while the order is active), `cancellable`, `stops` — example below | ✅ |
 | GET | `/{id}/timeline` | unified Kirana → Restaurant → Home line | ✅ |
@@ -212,6 +212,19 @@ Order details:
 ```
 **Bill**: `{foodSubtotal, grocerySubtotal, deliveryFee, convenienceFee, taxes, discount, total, refunds, netTotal}`. `refunds` is what has already gone back to the customer (missing items, unavailable groceries, cancellation) and `netTotal = total - refunds`; in the cart `refunds` is `0.00` and `netTotal = total`.
 
+**Paying** (UPI intent only; there is no UPI collect / `upiVpa`):
+```
+POST /api/v1/customer/orders/checkout
+Idempotency-Key: 4c1d…
+{ "addressId": "a71e…", "paymentMethod": "UPI" }
+→ 201 { "orderId": "6f1c…", "status": "PENDING", "payableAmount": 167.50,
+        "upiIntentUrl": "upi://pay?pa=hyperlocal@bank&pn=HyperLocal&am=167.50&cu=INR&tr=…",
+        "payment": { "paymentId": "…", "orderId": "6f1c…", "amount": 167.50, "status": "HOLD_PENDING", "upiIntentUrl": "upi://…", "expiresAt": "…" } }
+```
+1. If `upiIntentUrl` is present, open it in the UPI app. It is **null** when there is nothing to approve: the order is already `CONFIRMED` (wallet payment, or the dev gateway approved it) or the hold failed.
+2. Wait for `PAYMENT_CONFIRMED` or `PAYMENT_FAILED` on `/user/queue/tracking`; poll `GET /customer/orders/{id}` as a fallback.
+3. After `PAYMENT_FAILED` the order stays `PENDING`; retry with `POST /payments/orders/{id}/upi-hold` (or cancel it).
+
 **Order status** (state machine; illegal moves return `409 ILLEGAL_STATE_TRANSITION`):
 `PENDING → CONFIRMED → (BATCHED →) PICKING → OUT_FOR_DELIVERY → COMPLETED`, and `CANCELLED` from anything before pickup.
 With the fake gateway (default) and wallet payments the order is `CONFIRMED` right away; with a real gateway it stays `PENDING` until the payment webhook confirms the hold.
@@ -231,7 +244,7 @@ Deleting the account (`DELETE /customer/me`) is refused with `409 ORDER_IN_PROGR
 Payment status: `HOLD_PENDING → HELD → CAPTURED → PARTIALLY_REFUNDED → REFUNDED`, `HOLD_PENDING/HELD → RELEASED`, `HOLD_PENDING → FAILED → HOLD_PENDING` (retry).
 Money flow: the hold is captured at the first pickup (Kirana QR / restaurant hand-over), which also records what each store is owed. Missing items and unavailable groceries are refunded to the **wallet**; cancelling releases an uncaptured hold or refunds the rest to the wallet.
 
-Gateways (`PaymentGateway`): the default is a fake that approves holds instantly. **Dev only:** a `upiVpa` ending in `@pending` keeps the hold `HOLD_PENDING` until you post a webhook `{"eventId","reference","type":"HOLD_CONFIRMED"|"HOLD_FAILED"}` signed as hex HMAC-SHA256 of the body with `PAYMENT_WEBHOOK_SECRET`. A Razorpay skeleton runs with the `razorpay` profile (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`).
+Gateways (`PaymentGateway`): without the `razorpay` profile a fake gateway is used. Its outcome is `payments.fake.default-outcome` (`SUCCESS`); **in the `dev` profile only**, a checkout or retry request can choose it with the header `X-Fake-Payment: SUCCESS | PENDING | FAIL` (ignored in any other profile). `PENDING` waits for a webhook `{"eventId","reference","type":"HOLD_CONFIRMED"|"HOLD_FAILED"}` signed as hex HMAC-SHA256 of the body with `PAYMENT_WEBHOOK_SECRET`. A Razorpay skeleton runs with the `razorpay` profile (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`).
 
 ---
 
@@ -425,6 +438,15 @@ Every message on every queue has the same shape; switch on `type`, read `data`:
             "missingItems": [ { "itemId": "41b8…", "name": "Brown Bread", "quantity": 1, "refundAmount": 45.00 } ],
             "bill": { "foodSubtotal": 0.00, "grocerySubtotal": 165.00, "deliveryFee": 0.00, "convenienceFee": 10.00, "taxes": 0.00,
                       "discount": 0.00, "total": 175.00, "refunds": 45.00, "netTotal": 130.00 } } }
+```
+
+`PAYMENT_CONFIRMED` / `PAYMENT_FAILED`: the outcome of the payment after checkout (or a retry).
+```json
+{ "type": "PAYMENT_CONFIRMED", "sentAt": "…",
+  "data": { "orderId": "6f1c…", "paymentId": "…", "paymentStatus": "HELD", "orderStatus": "CONFIRMED", "amount": 167.50, "message": "Payment received" } }
+{ "type": "PAYMENT_FAILED", "sentAt": "…",
+  "data": { "orderId": "6f1c…", "paymentId": "…", "paymentStatus": "FAILED", "orderStatus": "PENDING", "amount": 167.50,
+            "message": "The payment didn't go through. Try again." } }
 ```
 
 ### Rider messages (`/user/queue/route-updates`)
