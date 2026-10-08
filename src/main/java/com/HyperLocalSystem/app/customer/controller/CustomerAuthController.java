@@ -1,6 +1,7 @@
 package com.HyperLocalSystem.app.customer.controller;
 
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.AuthResponse;
+import com.HyperLocalSystem.app.auth.dto.AuthDtos.LogoutRequest;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.MessageResponse;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.OtpLoginRequest;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.OtpSentResponse;
@@ -76,8 +77,8 @@ public class CustomerAuthController {
 
     @PostMapping("/logout")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void logout(@Valid @RequestBody RefreshTokenRequest request) {
-        authService.logout(request.refreshToken());
+    public void logout(@Valid @RequestBody LogoutRequest request) {
+        authService.logout(request.refreshToken(), request.deviceToken());
     }
 
     @PostMapping("/password/forgot")

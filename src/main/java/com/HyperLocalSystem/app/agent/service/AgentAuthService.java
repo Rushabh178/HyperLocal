@@ -14,6 +14,7 @@ import com.HyperLocalSystem.app.auth.service.OtpService;
 import com.HyperLocalSystem.app.common.exception.ApiException;
 import com.HyperLocalSystem.app.common.model.AccountStatus;
 import com.HyperLocalSystem.app.security.PhoneNumbers;
+import com.HyperLocalSystem.app.notification.DeviceService;
 import com.HyperLocalSystem.app.security.Role;
 import com.HyperLocalSystem.app.security.TokenService;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -39,8 +40,8 @@ public class AgentAuthService extends AccountAuthService<DeliveryAgent, AgentPro
     private final AgentProfileService profileService;
 
     public AgentAuthService(DeliveryAgentRepository agents, AgentProfileService profileService, OtpService otpService,
-                            TokenService tokenService, PasswordEncoder passwordEncoder) {
-        super(otpService, tokenService, passwordEncoder);
+                            TokenService tokenService, PasswordEncoder passwordEncoder, DeviceService deviceService) {
+        super(otpService, tokenService, passwordEncoder, deviceService);
         this.agents = agents;
         this.profileService = profileService;
     }

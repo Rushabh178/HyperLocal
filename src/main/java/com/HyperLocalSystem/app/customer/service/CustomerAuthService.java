@@ -11,6 +11,7 @@ import com.HyperLocalSystem.app.customer.dto.CustomerDtos.CustomerSignupRequest;
 import com.HyperLocalSystem.app.customer.entity.Customer;
 import com.HyperLocalSystem.app.customer.repository.CustomerRepository;
 import com.HyperLocalSystem.app.security.PhoneNumbers;
+import com.HyperLocalSystem.app.notification.DeviceService;
 import com.HyperLocalSystem.app.security.Role;
 import com.HyperLocalSystem.app.security.TokenService;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -27,8 +28,8 @@ public class CustomerAuthService extends AccountAuthService<Customer, CustomerPr
     private final CustomerRepository customers;
 
     public CustomerAuthService(CustomerRepository customers, OtpService otpService,
-                               TokenService tokenService, PasswordEncoder passwordEncoder) {
-        super(otpService, tokenService, passwordEncoder);
+                               TokenService tokenService, PasswordEncoder passwordEncoder, DeviceService deviceService) {
+        super(otpService, tokenService, passwordEncoder, deviceService);
         this.customers = customers;
     }
 

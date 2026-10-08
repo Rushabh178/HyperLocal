@@ -13,6 +13,7 @@ import com.HyperLocalSystem.app.auth.dto.AuthDtos.VerifyPhoneRequest;
 import com.HyperLocalSystem.app.auth.entity.OtpPurpose;
 import com.HyperLocalSystem.app.common.exception.ApiException;
 import com.HyperLocalSystem.app.common.model.AccountStatus;
+import com.HyperLocalSystem.app.notification.DeviceService;
 import com.HyperLocalSystem.app.security.PhoneNumbers;
 import com.HyperLocalSystem.app.security.Role;
 import com.HyperLocalSystem.app.security.TokenService;
@@ -38,11 +39,14 @@ public abstract class AccountAuthService<A extends AuthAccount, P> {
     protected final OtpService otpService;
     protected final TokenService tokenService;
     protected final PasswordEncoder passwordEncoder;
+    protected final DeviceService deviceService;
 
-    protected AccountAuthService(OtpService otpService, TokenService tokenService, PasswordEncoder passwordEncoder) {
+    protected AccountAuthService(OtpService otpService, TokenService tokenService, PasswordEncoder passwordEncoder,
+                                 DeviceService deviceService) {
         this.otpService = otpService;
         this.tokenService = tokenService;
         this.passwordEncoder = passwordEncoder;
+        this.deviceService = deviceService;
     }
 
     protected abstract Role role();
@@ -119,7 +123,14 @@ public abstract class AccountAuthService<A extends AuthAccount, P> {
     }
 
     public void logout(String refreshToken) {
+        logout(refreshToken, null);
+    }
+
+    /** Signs this device out and, if given, stops push notifications to its token. */
+    @Transactional
+    public void logout(String refreshToken, String deviceToken) {
         tokenService.revoke(refreshToken, role());
+        deviceService.unregister(deviceToken, role());
     }
 
     // ----------------------------------------------------------------- passwords

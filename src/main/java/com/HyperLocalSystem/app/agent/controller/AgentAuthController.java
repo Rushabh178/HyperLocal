@@ -4,6 +4,7 @@ import com.HyperLocalSystem.app.agent.dto.AgentDtos.AgentProfileResponse;
 import com.HyperLocalSystem.app.agent.dto.AgentDtos.AgentSignupRequest;
 import com.HyperLocalSystem.app.agent.service.AgentAuthService;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.AuthResponse;
+import com.HyperLocalSystem.app.auth.dto.AuthDtos.LogoutRequest;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.MessageResponse;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.OtpLoginRequest;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.OtpSentResponse;
@@ -77,8 +78,8 @@ public class AgentAuthController {
 
     @PostMapping("/logout")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void logout(@Valid @RequestBody RefreshTokenRequest request) {
-        authService.logout(request.refreshToken());
+    public void logout(@Valid @RequestBody LogoutRequest request) {
+        authService.logout(request.refreshToken(), request.deviceToken());
     }
 
     @PostMapping("/password/forgot")

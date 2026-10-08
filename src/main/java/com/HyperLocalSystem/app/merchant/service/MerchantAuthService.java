@@ -14,6 +14,7 @@ import com.HyperLocalSystem.app.merchant.entity.Merchant;
 import com.HyperLocalSystem.app.merchant.entity.MerchantType;
 import com.HyperLocalSystem.app.merchant.repository.MerchantRepository;
 import com.HyperLocalSystem.app.security.PhoneNumbers;
+import com.HyperLocalSystem.app.notification.DeviceService;
 import com.HyperLocalSystem.app.security.Role;
 import com.HyperLocalSystem.app.security.TokenService;
 import com.HyperLocalSystem.app.spatial.SpatialIndexService;
@@ -38,8 +39,8 @@ public class MerchantAuthService extends AccountAuthService<Merchant, MerchantPr
     private final SpatialIndexService spatialIndex;
 
     public MerchantAuthService(MerchantRepository merchants, SpatialIndexService spatialIndex, OtpService otpService,
-                               TokenService tokenService, PasswordEncoder passwordEncoder) {
-        super(otpService, tokenService, passwordEncoder);
+                               TokenService tokenService, PasswordEncoder passwordEncoder, DeviceService deviceService) {
+        super(otpService, tokenService, passwordEncoder, deviceService);
         this.merchants = merchants;
         this.spatialIndex = spatialIndex;
     }

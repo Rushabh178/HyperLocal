@@ -41,6 +41,10 @@ public final class AuthDtos {
     public record RefreshTokenRequest(@NotBlank String refreshToken) {
     }
 
+    /** {@code deviceToken}: this phone's push token, removed in the same call so it stops getting pushes. */
+    public record LogoutRequest(@NotBlank String refreshToken, @Size(max = 512) String deviceToken) {
+    }
+
     public record ResetPasswordRequest(
             @NotBlank @Pattern(regexp = PhoneNumbers.INDIAN_MOBILE_REGEX, message = PHONE_MESSAGE) String phone,
             @NotBlank @Pattern(regexp = OTP_REGEX, message = "must be 6 digits") String otp,

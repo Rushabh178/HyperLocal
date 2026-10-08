@@ -19,9 +19,10 @@ Needs Java 25+, PostgreSQL with PostGIS, and (for tests) Docker.
 | `PAYMENT_WEBHOOK_SECRET` | prod | dev value | HMAC key for payment callbacks |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | with `razorpay` | – | Razorpay gateway |
 | `OSRM_BASE_URL` | with `osrm` | `http://localhost:5000` | OSRM routing server |
+| `FIREBASE_CREDENTIALS` | with `fcm` | application-default credentials | path to the Firebase service-account JSON |
 | `STORAGE_DIR` / `PUBLIC_BASE_URL` | no | `./uploads` / `http://localhost:8080` | local file storage for KYC uploads |
 
-Profiles (`SPRING_PROFILES_ACTIVE`): none = fake payment gateway, haversine routing, local file storage; `razorpay` = Razorpay gateway; `osrm` = OSRM routing.
+Profiles (`SPRING_PROFILES_ACTIVE`): none = fake payment gateway, haversine routing, local file storage; `razorpay` = Razorpay gateway; `osrm` = OSRM routing; `fcm` = real push notifications (otherwise they are logged).
 
 Concurrent edits of the same order or payment return `409 CONCURRENT_UPDATE`; just retry.
 
@@ -51,6 +52,36 @@ There are three separate account types. Each has its own table, its own URL spac
 - **OTP:** 6 digits, valid for 5 minutes, max 5 wrong attempts, 30 s before a resend. OTPs are scoped by role, so a customer OTP can't verify a partner account.
   - In development (`app.otp.provider=log`) the OTP is printed in the server log as `[DEV OTP] ...`.
 - **Phone numbers:** `9876543210`, `+91 98765 43210` and `919876543210` are all accepted and stored as `+919876543210`. The same number can hold a customer account *and* a partner account.
+
+### Push notifications (all three apps)
+After every sign-in, and whenever the push SDK hands out a new token, register the phone:
+```
+POST /api/v1/customer/devices      (or /api/v1/agent/devices, /api/v1/merchant/devices)
+Authorization: Bearer <accessToken>
+{ "token": "dQw4w9WgXcQ:APA91b…", "platform": "ANDROID" }        // ANDROID | IOS | WEB
+→ 204
+```
+It is an **upsert on the token**: if another account registered the same token before (same phone, different login), the token moves to the account that registered last.
+Unregister by logging out with the token; there is no separate DELETE:
+```
+POST /api/v1/customer/auth/logout   (same for agent / merchant)
+{ "refreshToken": "kq3…", "deviceToken": "dQw4w9WgXcQ:APA91b…" }      // deviceToken optional
+→ 204
+```
+Every push carries the WebSocket envelope as FCM **data** (all values are strings): `type`, `sentAt`, and `data` (the JSON of the WebSocket `data`).
+| Type | Who | Shown as |
+|---|---|---|
+| `OFFER` | rider | **data-only, high priority**, TTL ends at the offer's `expiresAt` (a stale offer is never delivered late) |
+| `BROADCAST_OFFER` | Kirana | **data-only, high priority**, TTL ends at `expiresAt` |
+| `STOP_ADDED` | rider | notification "+1 stop added" / the injection message |
+| `ORDER_STATUS` | customer | notification "Order update" / e.g. "Your order is on the way" |
+| `NEW_ORDER`, `ORDER_CANCELLED`, `BROADCAST_TAKEN`, `RIDER_ARRIVING`, `ORDER_PICKED_UP` | merchant | notification with a title and body |
+Other types are WebSocket-only. Example FCM data of a rider offer:
+```json
+{ "type": "OFFER", "sentAt": "2026-10-08T13:20:00Z",
+  "data": "{\"offerId\":\"a3e0…\",\"orderIds\":[\"6f1c…\"],\"estimatedEarnings\":40.00,\"expiresAt\":\"2026-10-08T13:20:30Z\", …}" }
+```
+In development pushes are only logged (`[DEV PUSH] …`); the `fcm` profile sends them through Firebase (`FIREBASE_CREDENTIALS` = path to the service-account JSON, or Google application-default credentials).
 
 ### Customer sign-up flow
 ```
@@ -85,7 +116,7 @@ Ops approves partners and stores through the admin endpoints below.
 | POST | `/otp/send` | `phone` (password-less login) | ✅ |
 | POST | `/otp/login` | `phone, otp` | ✅ |
 | POST | `/refresh` | `refreshToken` | ✅ |
-| POST | `/logout` | `refreshToken` | ✅ |
+| POST | `/logout` | `refreshToken, deviceToken?` (removes the push token too) | ✅ |
 | POST | `/password/forgot` | `phone` | ✅ |
 | POST | `/password/reset` | `phone, otp, newPassword` | ✅ |
 
@@ -237,7 +268,7 @@ Same flow as the other apps, but merchants sign in with their **phone number onl
 | POST | `/verify-phone` · `/verify-phone/resend` | `phone, otp` · `phone` | ✅ |
 | POST | `/login` | `identifier` (phone), `password` | ✅ |
 | POST | `/otp/send` · `/otp/login` | `phone` · `phone, otp` | ✅ |
-| POST | `/refresh` · `/logout` | `refreshToken` | ✅ |
+| POST | `/refresh` · `/logout` | `refreshToken` · `refreshToken, deviceToken?` | ✅ |
 | POST | `/password/forgot` · `/password/reset` | `phone` · `phone, otp, newPassword` | ✅ |
 
 Sign-up body: `type` (KIRANA/RESTAURANT), `storeName`, `ownerName`, `phone`, `password`, `address`, `pincode`, `location {lat,lng}`, `fssaiNumber` (**required for RESTAURANT**, else `400 FSSAI_REQUIRED`), `gstin?`, `upiVpa?`, `cuisines?` (restaurants, up to 5), `imageUrl?`.

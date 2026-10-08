@@ -5,6 +5,7 @@ import com.HyperLocalSystem.app.admin.entity.AdminUser;
 import com.HyperLocalSystem.app.admin.repository.AdminUserRepository;
 import com.HyperLocalSystem.app.auth.service.AccountAuthService;
 import com.HyperLocalSystem.app.auth.service.OtpService;
+import com.HyperLocalSystem.app.notification.DeviceService;
 import com.HyperLocalSystem.app.security.Role;
 import com.HyperLocalSystem.app.security.TokenService;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -23,8 +24,8 @@ public class AdminAuthService extends AccountAuthService<AdminUser, AdminProfile
     private final AdminUserRepository admins;
 
     public AdminAuthService(AdminUserRepository admins, OtpService otpService, TokenService tokenService,
-                            PasswordEncoder passwordEncoder) {
-        super(otpService, tokenService, passwordEncoder);
+                            PasswordEncoder passwordEncoder, DeviceService deviceService) {
+        super(otpService, tokenService, passwordEncoder, deviceService);
         this.admins = admins;
     }
 

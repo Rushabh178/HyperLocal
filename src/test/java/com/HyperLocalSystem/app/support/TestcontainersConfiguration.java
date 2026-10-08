@@ -4,6 +4,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.messaging.SubscribableChannel;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
@@ -27,6 +28,13 @@ public class TestcontainersConfiguration {
     @Bean
     CapturingOtpSender capturingOtpSender() {
         return new CapturingOtpSender();
+    }
+
+    /** Replaces the logging sender so tests can see every push. */
+    @Bean
+    @Primary
+    CapturingPushSender capturingPushSender() {
+        return new CapturingPushSender();
     }
 
     @Bean
