@@ -274,10 +274,36 @@ Same flow as the other apps, but merchants sign in with their **phone number onl
 Sign-up body: `type` (KIRANA/RESTAURANT), `storeName`, `ownerName`, `phone`, `password`, `address`, `pincode`, `location {lat,lng}`, `fssaiNumber` (**required for RESTAURANT**, else `400 FSSAI_REQUIRED`), `gstin?`, `upiVpa?`, `cuisines?` (restaurants, up to 5), `imageUrl?`.
 A new store is `verificationStatus: PENDING` until ops approves it, and cannot open before that (`403 MERCHANT_NOT_APPROVED`).
 
+### Uploads, profile and documents
+Uploads need a token, so they happen **after `verify-phone`**: sign up → verify phone → upload photo/documents → save them → wait for approval.
+```
+POST /api/v1/merchant/uploads
+{ "purpose": "STORE_PHOTO", "contentType": "image/png" }       // DOCUMENT may also be application/pdf
+→ 200 { "uploadUrl": "http://localhost:8080/api/v1/files/upload?key=public%2Fmerchants%2F0c5e…%2Fstore%2F9f2a….png&expires=…&contentType=image%2Fpng&sig=…",
+        "fileKey": "public/merchants/0c5e…/store/9f2a….png",
+        "fileUrl": "http://localhost:8080/api/v1/files/public/merchants/0c5e…/store/9f2a….png",
+        "publicRead": true, "expiresAt": "…" }
+
+PUT <uploadUrl>   (raw bytes, same Content-Type, no token, max 10 MB, within 15 min)  → 204
+```
+- `STORE_PHOTO` / `ITEM_PHOTO` live under `public/…` and anyone can `GET` them (customer catalogue). Save a store photo with `PATCH /merchant/me {"imageUrl": fileUrl}`, an item photo with `PUT /merchant/items/{id}` (`imageUrl`).
+- `DOCUMENT` lives under `merchants/{id}/…` and only the store itself and admins can `GET` it. Save it with:
+```
+PUT /api/v1/merchant/me/documents/FSSAI_CERT
+{ "documentNumber": "12345678901234", "fileUrl": "http://localhost:8080/api/v1/files/merchants/0c5e…/documents/77d1….pdf" }
+→ 200 { "verificationStatus": "PENDING", "missingDocuments": ["SHOP_PHOTO", "OWNER_ID"],
+        "documents": [ { "type": "FSSAI_CERT", "documentNumberMasked": "XXXXXXXXXX1234", "fileUrl": "…", "status": "UPLOADED", "remarks": null, "uploadedAt": "…" } ] }
+```
+Required documents: restaurants `FSSAI_CERT, SHOP_PHOTO, OWNER_ID`; Kiranas `SHOP_PHOTO, OWNER_ID`. `GST_CERT` and `BANK_PROOF` are optional.
+
 ### Store: `/merchant`
 | Method | Path | Notes | Status |
 |---|---|---|---|
-| GET | `/me` | profile incl. `verificationStatus`, `rejectionReason`, `open` | ✅ |
+| GET | `/me` | profile incl. `verificationStatus`, `rejectionReason`, `open`, `imageUrl`, `cuisines`, `openingHours`, `upiVpa` | ✅ |
+| PATCH | `/me` | partial: `storeName?, ownerName?, imageUrl?, openingHours?, cuisines?` (restaurants), `upiVpa?` → profile | ✅ |
+| POST | `/uploads` | `{purpose: DOCUMENT/STORE_PHOTO/ITEM_PHOTO, contentType}` → signed upload link (see below) | ✅ |
+| GET | `/me/documents` | `{verificationStatus, missingDocuments, documents}` | ✅ |
+| PUT | `/me/documents/{type}` | `{documentNumber?, fileUrl}`; types `FSSAI_CERT, GST_CERT, SHOP_PHOTO, OWNER_ID, BANK_PROOF`; `409 DOCUMENTS_LOCKED` once approved | ✅ |
 | PUT | `/me/password` | `currentPassword, newPassword` | ✅ |
 | PUT | `/me/store-status` | `{open}`; approved stores only | ✅ |
 | GET | `/store-qr` | **every store** (Kirana and restaurant); signed payload `HLQR1.<merchantId>.<exp>.<sig>`, valid 15 min — show it as a QR and refresh before `expiresAt`. Response `{"qrPayload": "HLQR1.…", "expiresAt": "…"}` | ✅ |
@@ -314,7 +340,8 @@ There is no admin sign-up. The first admin is created on startup from `ADMIN_EMA
 | POST | `/agents/{id}/reject` `{reason}` | `REJECTED` with `rejectionReason` | ✅ |
 | POST | `/agents/{id}/documents/{type}/reject` `{reason}` | document `REJECTED` with remarks; partner back to `PENDING_DOCUMENTS` to re-upload | ✅ |
 | GET | `/merchants?status=PENDING&page&size` | store profiles by approval status | ✅ |
-| POST | `/merchants/{id}/approve` | → `APPROVED`; returns the store profile | ✅ |
+| GET | `/merchants/{id}/documents` | the store's documents (same shape as `GET /merchant/me/documents`); open a file with `GET /files/{key}` using the admin token | ✅ |
+| POST | `/merchants/{id}/approve` | → `APPROVED`, all documents `VERIFIED`; returns the store profile | ✅ |
 | POST | `/merchants/{id}/reject` `{reason}` | → `REJECTED`, store closed | ✅ |
 
 ---
@@ -323,7 +350,7 @@ There is no admin sign-up. The first admin is created on startup from `ADMIN_EMA
 | Method | Path | Notes | Status |
 |---|---|---|---|
 | PUT | `/files/upload?key&expires&contentType&sig` | public, authorised by the signed link only | ✅ |
-| GET | `/files/{key}` | admins: any file; partners: only their own `agents/{id}/...` | ✅ |
+| GET | `/files/{key}` | `public/…` (store and item photos): anyone, no token. Everything else: admins any file, partners only `agents/{id}/…`, stores only `merchants/{id}/…` | ✅ |
 
 ## Real-time (STOMP over WebSocket)
 - Endpoint: `ws://localhost:8080/ws`. The CONNECT frame must carry the header `Authorization: Bearer <accessToken>`.

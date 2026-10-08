@@ -111,6 +111,10 @@ public class Merchant implements AuthAccount {
     @Column(name = "image_url", length = 500)
     private String imageUrl;
 
+    /** Free text shown to customers, e.g. "09:00-22:00, closed Tuesdays". */
+    @Column(name = "opening_hours", length = 100)
+    private String openingHours;
+
     // ---- ratings (denormalised so discovery never aggregates order_ratings) ----
 
     @Column(name = "rating_sum", nullable = false)

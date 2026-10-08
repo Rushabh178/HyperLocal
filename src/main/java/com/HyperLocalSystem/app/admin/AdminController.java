@@ -5,6 +5,7 @@ import com.HyperLocalSystem.app.agent.dto.AgentDtos.AgentProfileResponse;
 import com.HyperLocalSystem.app.agent.entity.DocumentType;
 import com.HyperLocalSystem.app.agent.entity.VerificationStatus;
 import com.HyperLocalSystem.app.common.api.PageResponse;
+import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantDocumentsResponse;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantProfileResponse;
 import com.HyperLocalSystem.app.merchant.entity.ApprovalStatus;
 import jakarta.validation.Valid;
@@ -59,6 +60,11 @@ public class AdminController {
                                                            @RequestParam(defaultValue = "0") int page,
                                                            @RequestParam(defaultValue = "20") int size) {
         return adminService.merchantsByStatus(status, page, size);
+    }
+
+    @GetMapping("/merchants/{merchantId}/documents")
+    public MerchantDocumentsResponse merchantDocuments(@PathVariable UUID merchantId) {
+        return adminService.merchantDocuments(merchantId);
     }
 
     @PostMapping("/merchants/{merchantId}/approve")

@@ -58,6 +58,8 @@ public class SecurityConfig {
                         .requestMatchers("/error").permitAll()
                         // KYC uploads: authorised by the signed, short-lived URL itself (see FileStorage).
                         .requestMatchers(HttpMethod.PUT, "/api/v1/files/upload").permitAll()
+                        // Store and item photos are shown in the public catalogue.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/files/public/**").permitAll()
                         .requestMatchers("/api/v1/customer/**", "/api/v1/payments/**").hasRole(Role.CUSTOMER.name())
                         .requestMatchers("/api/v1/agent/**").hasRole(Role.DELIVERY_AGENT.name())
                         .requestMatchers("/api/v1/merchant/**").hasRole(Role.MERCHANT.name())

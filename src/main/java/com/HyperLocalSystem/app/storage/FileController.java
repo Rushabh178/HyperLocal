@@ -45,15 +45,25 @@ public class FileController {
         storage.store(key, expires, contentType, sig, actualContentType, request.getInputStream());
     }
 
-    /** KYC files are private: admins can read any, a partner only their own. */
+    /**
+     * {@code public/...} (store and item photos) is open to everyone. Everything else is private:
+     * admins can read any file, partners and stores only their own ({@code agents/<id>/},
+     * {@code merchants/<id>/}).
+     */
     @GetMapping("/{*key}")
     public ResponseEntity<Resource> download(@AuthenticationPrincipal Jwt jwt, @PathVariable String key) {
         String fileKey = key.startsWith("/") ? key.substring(1) : key;
-        String role = jwt.getClaimAsString(TokenService.ROLE_CLAIM);
-        boolean allowed = Role.ADMIN.name().equals(role)
-                || (Role.DELIVERY_AGENT.name().equals(role) && fileKey.startsWith("agents/" + jwt.getSubject() + "/"));
-        if (!allowed) {
-            throw ApiException.forbidden("FORBIDDEN", "You can't open this file");
+        if (!fileKey.startsWith(LocalFileStorage.PUBLIC_PREFIX)) {
+            if (jwt == null) {
+                throw ApiException.unauthorized("UNAUTHORIZED", "Sign in to open this file");
+            }
+            String role = jwt.getClaimAsString(TokenService.ROLE_CLAIM);
+            boolean allowed = Role.ADMIN.name().equals(role)
+                    || (Role.DELIVERY_AGENT.name().equals(role) && fileKey.startsWith("agents/" + jwt.getSubject() + "/"))
+                    || (Role.MERCHANT.name().equals(role) && fileKey.startsWith("merchants/" + jwt.getSubject() + "/"));
+            if (!allowed) {
+                throw ApiException.forbidden("FORBIDDEN", "You can't open this file");
+            }
         }
         Path path = storage.resolve(fileKey);
         if (!Files.isRegularFile(path)) {

@@ -10,10 +10,12 @@ import com.HyperLocalSystem.app.agent.repository.DeliveryAgentRepository;
 import com.HyperLocalSystem.app.agent.service.AgentProfileService;
 import com.HyperLocalSystem.app.common.api.PageResponse;
 import com.HyperLocalSystem.app.common.exception.ApiException;
+import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantDocumentsResponse;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantProfileResponse;
 import com.HyperLocalSystem.app.merchant.entity.ApprovalStatus;
 import com.HyperLocalSystem.app.merchant.entity.Merchant;
 import com.HyperLocalSystem.app.merchant.repository.MerchantRepository;
+import com.HyperLocalSystem.app.merchant.service.MerchantDocumentService;
 import com.HyperLocalSystem.app.merchant.service.MerchantService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -32,6 +34,7 @@ public class AdminService {
     private final AgentDocumentRepository documents;
     private final AgentProfileService agentProfileService;
     private final MerchantRepository merchants;
+    private final MerchantDocumentService merchantDocuments;
 
     // ----------------------------------------------------------------- delivery partners
 
@@ -91,9 +94,17 @@ public class AdminService {
                 MerchantService::toResponse);
     }
 
+    /** The store's documents with their file links (open them with GET /files/{key} as admin). */
+    @Transactional(readOnly = true)
+    public MerchantDocumentsResponse merchantDocuments(UUID merchantId) {
+        return merchantDocuments.toResponse(loadMerchant(merchantId));
+    }
+
     @Transactional
     public MerchantProfileResponse approveMerchant(UUID merchantId) {
         Merchant merchant = loadMerchant(merchantId);
+        merchantDocuments.verifyAll(merchantId);
+        // TODO(edge-case): refuse approval while required documents are missing.
         merchant.setApprovalStatus(ApprovalStatus.APPROVED);
         merchant.setRejectionReason(null);
         return MerchantService.toResponse(merchant);

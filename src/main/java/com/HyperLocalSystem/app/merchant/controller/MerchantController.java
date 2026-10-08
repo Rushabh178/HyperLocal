@@ -15,7 +15,14 @@ import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantProfileRespons
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.PrepDelayRequest;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.StoreQrResponse;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.StoreStatusRequest;
+import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantDocumentRequest;
+import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantDocumentsResponse;
+import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.UpdateMerchantProfileRequest;
+import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.UploadRequest;
+import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.UploadResponse;
+import com.HyperLocalSystem.app.merchant.entity.MerchantDocument;
 import com.HyperLocalSystem.app.merchant.service.MerchantAuthService;
+import com.HyperLocalSystem.app.merchant.service.MerchantDocumentService;
 import com.HyperLocalSystem.app.merchant.service.MerchantService;
 import com.HyperLocalSystem.app.security.CurrentUser;
 import jakarta.validation.Valid;
@@ -44,10 +51,35 @@ public class MerchantController {
 
     private final MerchantService merchantService;
     private final MerchantAuthService authService;
+    private final MerchantDocumentService documentService;
 
     @GetMapping("/me")
     public MerchantProfileResponse me(@AuthenticationPrincipal Jwt jwt) {
         return merchantService.profile(CurrentUser.id(jwt));
+    }
+
+    /** Partial update: storeName, ownerName, imageUrl, openingHours, cuisines, upiVpa. */
+    @PatchMapping("/me")
+    public MerchantProfileResponse updateProfile(@AuthenticationPrincipal Jwt jwt,
+                                                 @Valid @RequestBody UpdateMerchantProfileRequest request) {
+        return merchantService.updateProfile(CurrentUser.id(jwt), request);
+    }
+
+    /** Signed upload link for a document (private) or a store / item photo (public). */
+    @PostMapping("/uploads")
+    public UploadResponse upload(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody UploadRequest request) {
+        return documentService.createUpload(CurrentUser.id(jwt), request);
+    }
+
+    @GetMapping("/me/documents")
+    public MerchantDocumentsResponse documents(@AuthenticationPrincipal Jwt jwt) {
+        return documentService.documents(CurrentUser.id(jwt));
+    }
+
+    @PutMapping("/me/documents/{type}")
+    public MerchantDocumentsResponse saveDocument(@AuthenticationPrincipal Jwt jwt, @PathVariable MerchantDocument.Type type,
+                                                  @Valid @RequestBody MerchantDocumentRequest request) {
+        return documentService.upsert(CurrentUser.id(jwt), type, request);
     }
 
     /** Signs out all other devices; the response carries a fresh session for this one. */

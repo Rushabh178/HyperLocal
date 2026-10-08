@@ -5,6 +5,7 @@ import com.HyperLocalSystem.app.catalog.entity.ItemType;
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
 import com.HyperLocalSystem.app.common.model.TemperatureZone;
 import com.HyperLocalSystem.app.merchant.entity.ApprovalStatus;
+import com.HyperLocalSystem.app.merchant.entity.MerchantDocument;
 import com.HyperLocalSystem.app.merchant.entity.MerchantType;
 import com.HyperLocalSystem.app.security.PhoneNumbers;
 import jakarta.validation.Valid;
@@ -20,6 +21,7 @@ import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /** Kirana shops and restaurants share one merchant app; {@code type} decides which screens they see. */
@@ -61,7 +63,55 @@ public final class MerchantDtos {
             boolean open,
             ApprovalStatus verificationStatus,
             String rejectionReason,
+            String imageUrl,
+            List<String> cuisines,
+            String openingHours,
+            String upiVpa,
             Instant createdAt) {
+    }
+
+    /** Partial update: null fields are left unchanged. Location / address changes go through support. */
+    public record UpdateMerchantProfileRequest(
+            @Size(min = 1, max = 120) String storeName,
+            @Size(min = 1, max = 100) String ownerName,
+            @Size(max = 500) String imageUrl,
+            @Size(max = 100) String openingHours,
+            @Size(max = 5) List<@NotBlank @Size(max = 30) String> cuisines,
+            @Size(max = 100) String upiVpa) {
+    }
+
+    // ----------------------------------------------------------------- uploads & documents
+
+    /** DOCUMENT: private (owner + admin). STORE_PHOTO / ITEM_PHOTO: publicly readable (customer catalogue). */
+    public enum UploadPurpose { DOCUMENT, STORE_PHOTO, ITEM_PHOTO }
+
+    public record UploadRequest(
+            @NotNull UploadPurpose purpose,
+            @NotBlank @Pattern(regexp = "^(image/(jpeg|png)|application/pdf)$") String contentType) {
+    }
+
+    /** PUT the raw file to {@code uploadUrl}, then save {@code fileUrl} where it belongs. */
+    public record UploadResponse(String uploadUrl, String fileKey, String fileUrl, boolean publicRead, Instant expiresAt) {
+    }
+
+    public record MerchantDocumentRequest(
+            @Size(max = 30) String documentNumber,
+            @NotBlank @Size(max = 500) String fileUrl) {
+    }
+
+    public record MerchantDocumentResponse(
+            MerchantDocument.Type type,
+            String documentNumberMasked,
+            String fileUrl,
+            MerchantDocument.Status status,
+            String remarks,
+            Instant uploadedAt) {
+    }
+
+    public record MerchantDocumentsResponse(
+            ApprovalStatus verificationStatus,
+            Set<MerchantDocument.Type> missingDocuments,
+            List<MerchantDocumentResponse> documents) {
     }
 
     public record StoreStatusRequest(@NotNull Boolean open) {

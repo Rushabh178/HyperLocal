@@ -32,6 +32,8 @@ import java.util.Base64;
 public class LocalFileStorage implements FileStorage {
 
     static final long MAX_BYTES = 10L * 1024 * 1024;
+    /** Keys under this prefix are readable without signing in (store / item photos). */
+    public static final String PUBLIC_PREFIX = "public/";
     private static final String KEY_PATTERN = "^[A-Za-z0-9][A-Za-z0-9/_.-]{0,255}$";
 
     private final Path root;

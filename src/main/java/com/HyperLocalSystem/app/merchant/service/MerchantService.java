@@ -27,6 +27,7 @@ import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantOrderStatus;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantProfileResponse;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.PrepDelayRequest;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.StoreQrResponse;
+import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.UpdateMerchantProfileRequest;
 import com.HyperLocalSystem.app.merchant.entity.ApprovalStatus;
 import com.HyperLocalSystem.app.merchant.entity.Merchant;
 import com.HyperLocalSystem.app.merchant.entity.MerchantType;
@@ -48,6 +49,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -77,6 +79,32 @@ public class MerchantService {
     @Transactional(readOnly = true)
     public MerchantProfileResponse profile(UUID merchantId) {
         return toResponse(load(merchantId));
+    }
+
+    /** Partial profile update; {@code imageUrl} is usually a STORE_PHOTO from POST /merchant/uploads. */
+    @Transactional
+    public MerchantProfileResponse updateProfile(UUID merchantId, UpdateMerchantProfileRequest request) {
+        Merchant merchant = load(merchantId);
+        if (request.storeName() != null) {
+            merchant.setStoreName(request.storeName().trim());
+        }
+        if (request.ownerName() != null) {
+            merchant.setOwnerName(request.ownerName().trim());
+        }
+        if (request.imageUrl() != null) {
+            merchant.setImageUrl(trimToNull(request.imageUrl()));
+        }
+        if (request.openingHours() != null) {
+            merchant.setOpeningHours(trimToNull(request.openingHours()));
+        }
+        if (request.cuisines() != null && merchant.getType() == MerchantType.RESTAURANT) {
+            merchant.setCuisines(String.join(",", request.cuisines().stream().map(String::trim).toList()));
+        }
+        if (request.upiVpa() != null) {
+            merchant.setUpiVpa(trimToNull(request.upiVpa()));
+        }
+        // TODO(edge-case): check that imageUrl points at this store's own public upload.
+        return toResponse(merchant);
     }
 
     /** Only approved stores can open; closing is always allowed. */
@@ -321,10 +349,13 @@ public class MerchantService {
     }
 
     public static MerchantProfileResponse toResponse(Merchant merchant) {
+        List<String> cuisines = merchant.getCuisines() == null || merchant.getCuisines().isBlank() ? List.of()
+                : Arrays.stream(merchant.getCuisines().split(",")).map(String::trim).toList();
         return new MerchantProfileResponse(merchant.getId(), merchant.getType(), merchant.getStoreName(),
                 merchant.getOwnerName(), merchant.getPhone(), merchant.getAddress(),
                 GeoUtils.fromPoint(merchant.getLocation()), merchant.isOpen(), merchant.getApprovalStatus(),
-                merchant.getRejectionReason(), merchant.getCreatedAt());
+                merchant.getRejectionReason(), merchant.getImageUrl(), cuisines, merchant.getOpeningHours(),
+                merchant.getUpiVpa(), merchant.getCreatedAt());
     }
 
     public static CatalogItemResponse toItemResponse(CatalogItem item) {
