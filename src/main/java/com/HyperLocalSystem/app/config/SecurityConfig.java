@@ -32,7 +32,7 @@ import java.util.Base64;
  *   /api/v1/customer/auth/**  public      /api/v1/customer/**  ROLE_CUSTOMER
  *   /api/v1/agent/auth/**     public      /api/v1/agent/**     ROLE_DELIVERY_AGENT
  *   /api/v1/merchant/auth/**  public      /api/v1/merchant/**  ROLE_MERCHANT
- *                                         /api/v1/admin/**     ROLE_ADMIN
+ *   /api/v1/admin/auth/**     public      /api/v1/admin/**     ROLE_ADMIN
  * </pre>
  * A customer token can never call a delivery-partner endpoint and vice versa.
  */
@@ -48,7 +48,8 @@ public class SecurityConfig {
                 .formLogin(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/customer/auth/**", "/api/v1/agent/auth/**", "/api/v1/merchant/auth/**").permitAll()
+                        .requestMatchers("/api/v1/customer/auth/**", "/api/v1/agent/auth/**", "/api/v1/merchant/auth/**",
+                                "/api/v1/admin/auth/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/catalog/**").permitAll()
                         // Payment gateway callback: authenticated by its signature header, not a JWT.
                         .requestMatchers(HttpMethod.POST, "/api/v1/payments/webhook").permitAll()

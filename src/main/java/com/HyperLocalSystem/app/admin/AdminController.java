@@ -1,12 +1,13 @@
 package com.HyperLocalSystem.app.admin;
 
+import com.HyperLocalSystem.app.admin.dto.AdminDtos.ReviewRequest;
 import com.HyperLocalSystem.app.agent.dto.AgentDtos.AgentProfileResponse;
 import com.HyperLocalSystem.app.agent.entity.DocumentType;
 import com.HyperLocalSystem.app.agent.entity.VerificationStatus;
 import com.HyperLocalSystem.app.common.api.PageResponse;
+import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantProfileResponse;
+import com.HyperLocalSystem.app.merchant.entity.ApprovalStatus;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,19 +19,15 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
 
-/**
- * Operations console. Requires ROLE_ADMIN.
- * TODO: admin accounts + sign-in (e.g. an admins table extending AccountAuthService, or SSO).
- */
+/** Operations console. Requires ROLE_ADMIN (sign in at /api/v1/admin/auth/login). */
 @RestController
 @RequestMapping("/api/v1/admin")
 @RequiredArgsConstructor
 public class AdminController {
 
-    public record ReviewRequest(@NotBlank @Size(max = 250) String reason) {
-    }
-
     private final AdminService adminService;
+
+    // ---- delivery partners ----
 
     @GetMapping("/agents")
     public PageResponse<AgentProfileResponse> agents(@RequestParam(defaultValue = "UNDER_REVIEW") VerificationStatus status,
@@ -55,8 +52,22 @@ public class AdminController {
         return adminService.rejectDocument(agentId, type, request.reason());
     }
 
+    // ---- stores ----
+
+    @GetMapping("/merchants")
+    public PageResponse<MerchantProfileResponse> merchants(@RequestParam(defaultValue = "PENDING") ApprovalStatus status,
+                                                           @RequestParam(defaultValue = "0") int page,
+                                                           @RequestParam(defaultValue = "20") int size) {
+        return adminService.merchantsByStatus(status, page, size);
+    }
+
     @PostMapping("/merchants/{merchantId}/approve")
-    public void approveMerchant(@PathVariable UUID merchantId) {
-        adminService.approveMerchant(merchantId);
+    public MerchantProfileResponse approveMerchant(@PathVariable UUID merchantId) {
+        return adminService.approveMerchant(merchantId);
+    }
+
+    @PostMapping("/merchants/{merchantId}/reject")
+    public MerchantProfileResponse rejectMerchant(@PathVariable UUID merchantId, @Valid @RequestBody ReviewRequest request) {
+        return adminService.rejectMerchant(merchantId, request.reason());
     }
 }

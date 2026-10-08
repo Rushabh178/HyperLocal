@@ -25,7 +25,7 @@ There are three separate account types. Each has its own table, its own URL spac
 | Customer | `/customer/auth/**` | `/customer/**`, `/payments/**` | `CUSTOMER` |
 | Delivery partner | `/agent/auth/**` | `/agent/**` | `DELIVERY_AGENT` |
 | Kirana / restaurant | `/merchant/auth/**` | `/merchant/**` | `MERCHANT` |
-| Ops console | – | `/admin/**` | `ADMIN` |
+| Ops console | `/admin/auth/**` | `/admin/**` | `ADMIN` |
 
 - **Access token:** a JWT (HS256) valid for 15 minutes. Send it as `Authorization: Bearer <token>`.
 - **Refresh token:** an opaque token valid for 30 days. It is rotated on every `/refresh`. Re-using an old refresh token is treated as theft, so every session of that user is revoked.
@@ -50,8 +50,7 @@ PUT  /agent/me/duty                 {online:true}           → AVAILABLE (403 A
 ```
 Required documents: `AADHAAR, PAN, PROFILE_PHOTO`, plus `DRIVING_LICENSE, VEHICLE_RC` for motorised vehicles.
 
-> Until the admin endpoints are built, approve a partner in dev with:
-> `UPDATE delivery_agents SET verification_status='APPROVED' WHERE phone='+91XXXXXXXXXX';`
+Ops approves partners and stores through the admin endpoints below.
 
 ---
 
@@ -221,7 +220,24 @@ Item body: `name`, `description?`, `price` (> 0), `category`, `veg?`, `zone` (HO
 The item's `itemType` follows the store: restaurants create `FOOD`, Kiranas create `GROCERY`. Grocery listings form the "virtual warehouse": customers see products listed by any Kirana within 2 km, and whichever nearby Kirana claims the order fulfils it.
 
 ## Admin: `/admin` (ROLE_ADMIN)
-`GET /agents?status=UNDER_REVIEW` · `POST /agents/{id}/approve` · `POST /agents/{id}/reject` · `POST /agents/{id}/documents/{type}/reject` · `POST /merchants/{id}/approve`: all 🚧, and there is no admin sign-in yet.
+
+### Sign-in: `/admin/auth` (public)
+There is no admin sign-up. The first admin is created on startup from `ADMIN_EMAIL` / `ADMIN_PASSWORD` (and optional `ADMIN_NAME`) if that email has no admin yet.
+| Method | Path | Body | Status |
+|---|---|---|---|
+| POST | `/login` | `identifier` (email, or phone if set), `password` → tokens with `role: ADMIN` | ✅ |
+| POST | `/refresh` · `/logout` | `refreshToken` | ✅ |
+
+### Reviews
+| Method | Path | Notes | Status |
+|---|---|---|---|
+| GET | `/agents?status=UNDER_REVIEW&page&size` | partner profiles by KYC status | ✅ |
+| POST | `/agents/{id}/approve` | under-review only (`409 NOT_UNDER_REVIEW`); all documents `VERIFIED`, `APPROVED`, thermal box assigned | ✅ |
+| POST | `/agents/{id}/reject` `{reason}` | `REJECTED` with `rejectionReason` | ✅ |
+| POST | `/agents/{id}/documents/{type}/reject` `{reason}` | document `REJECTED` with remarks; partner back to `PENDING_DOCUMENTS` to re-upload | ✅ |
+| GET | `/merchants?status=PENDING&page&size` | store profiles by approval status | ✅ |
+| POST | `/merchants/{id}/approve` | → `APPROVED`; returns the store profile | ✅ |
+| POST | `/merchants/{id}/reject` `{reason}` | → `REJECTED`, store closed | ✅ |
 
 ---
 

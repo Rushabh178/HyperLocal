@@ -7,7 +7,7 @@ import java.time.Duration;
 
 /** Typed view of the {@code app.*} settings in application.properties. */
 @ConfigurationProperties(prefix = "app")
-public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing, Payment payment) {
+public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing, Payment payment, Admin admin) {
 
     public record Jwt(String secret, String issuer, Duration accessTokenTtl, Duration refreshTokenTtl) {
     }
@@ -48,5 +48,9 @@ public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing, Payment 
 
     /** {@code webhookSecret} verifies gateway callbacks (HMAC-SHA256); {@code holdTtl} is how long a UPI hold lasts. */
     public record Payment(String webhookSecret, Duration holdTtl) {
+    }
+
+    /** First ops admin, created on startup when the email is set (ADMIN_EMAIL / ADMIN_PASSWORD / ADMIN_NAME). */
+    public record Admin(String seedEmail, String seedPassword, String seedName) {
     }
 }

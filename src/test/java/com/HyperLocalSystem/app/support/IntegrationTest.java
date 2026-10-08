@@ -131,6 +131,20 @@ public abstract class IntegrationTest {
         return session;
     }
 
+    /** A bicycle partner (needs only AADHAAR, PAN, PROFILE_PHOTO); phone verified, nothing uploaded yet. */
+    protected Session signUpAgent() throws Exception {
+        String phone = randomPhone();
+        String signup = call(HttpMethod.POST, "/api/v1/agent/auth/signup", null, """
+                {"fullName":"Test Rider","phone":"%s","password":"secret-pass-1","vehicleType":"BICYCLE","city":"Pune"}"""
+                .formatted(phone), 201);
+        return verify("/api/v1/agent/auth/verify-phone", phone, read(signup, "$.userId"));
+    }
+
+    protected String adminToken() throws Exception {
+        return read(post("/api/v1/admin/auth/login", null,
+                "{\"identifier\":\"admin@test.local\",\"password\":\"admin-pass-123\"}"), "$.accessToken");
+    }
+
     /** Saves a delivery address at {@code location} (a {@link #point} JSON) and returns its id. */
     protected String addAddress(String customerToken, String location) throws Exception {
         String address = call(HttpMethod.POST, "/api/v1/customer/addresses", customerToken, """
