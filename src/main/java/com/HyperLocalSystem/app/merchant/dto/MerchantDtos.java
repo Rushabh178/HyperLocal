@@ -2,6 +2,9 @@ package com.HyperLocalSystem.app.merchant.dto;
 
 import com.HyperLocalSystem.app.auth.dto.AuthDtos;
 import com.HyperLocalSystem.app.catalog.entity.ItemType;
+import com.HyperLocalSystem.app.common.api.EarningsPeriod;
+import com.HyperLocalSystem.app.common.api.PageResponse;
+import com.HyperLocalSystem.app.common.api.PayoutItem;
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
 import com.HyperLocalSystem.app.common.model.TemperatureZone;
 import com.HyperLocalSystem.app.merchant.entity.ApprovalStatus;
@@ -20,6 +23,7 @@ import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -133,6 +137,16 @@ public final class MerchantDtos {
     }
 
     public record ClaimResponse(UUID broadcastId, UUID orderId, boolean claimed, String message) {
+    }
+
+    /** Same style as the partner earnings: settled orders and their total for the period, and the payouts. */
+    public record MerchantEarnings(
+            EarningsPeriod period,
+            LocalDate from,
+            LocalDate to,
+            int orderCount,
+            BigDecimal total,
+            PageResponse<PayoutItem> payouts) {
     }
 
     // ----------------------------------------------------------------- live events (data of /user/queue/merchant-events)

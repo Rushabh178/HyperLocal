@@ -58,4 +58,20 @@ public interface CatalogItemRepository extends JpaRepository<CatalogItem, UUID> 
             """, nativeQuery = true)
     Page<GroceryRow> findGroceries(@Param("merchantIds") Collection<UUID> merchantIds, @Param("pattern") String pattern,
                                    @Param("category") String category, Pageable pageable);
+
+    /** Categories of the same de-duplicated catalogue, with the number of distinct products in each. */
+    @Query(value = """
+            select g."category" as "category", count(*) as "itemCount" from (
+                select distinct on (lower(i.name), coalesce(i.pack_size, '')) i.category as "category"
+                from catalog_items i
+                where i.merchant_id in (:merchantIds) and i.item_type = 'GROCERY' and i.available
+                order by lower(i.name), coalesce(i.pack_size, ''), i.price
+            ) g
+            group by g."category"
+            order by g."category"
+            """, countQuery = """
+            select count(distinct i.category) from catalog_items i
+            where i.merchant_id in (:merchantIds) and i.item_type = 'GROCERY' and i.available
+            """, nativeQuery = true)
+    Page<GroceryCategoryRow> findGroceryCategories(@Param("merchantIds") Collection<UUID> merchantIds, Pageable pageable);
 }

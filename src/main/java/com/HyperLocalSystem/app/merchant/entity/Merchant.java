@@ -18,8 +18,6 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.locationtech.jts.geom.Point;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -131,9 +129,4 @@ public class Merchant implements AuthAccount {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
-    /** Average rating to one decimal, or null before the first rating. */
-    public BigDecimal rating() {
-        return ratingCount == 0 ? null
-                : BigDecimal.valueOf(ratingSum).divide(BigDecimal.valueOf(ratingCount), 1, RoundingMode.HALF_UP);
-    }
 }

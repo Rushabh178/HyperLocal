@@ -22,13 +22,13 @@ import com.HyperLocalSystem.app.dispatch.entity.RouteStop;
 import com.HyperLocalSystem.app.dispatch.repository.RouteStopRepository;
 import com.HyperLocalSystem.app.merchant.entity.Merchant;
 import com.HyperLocalSystem.app.merchant.repository.MerchantRepository;
-import com.HyperLocalSystem.app.order.dto.OrderDtos.AgentInfo;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.CancelOrderRequest;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.CheckoutRequest;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.CheckoutResponse;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.OrderDetail;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.OrderSummary;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.RateOrderRequest;
+import com.HyperLocalSystem.app.order.dto.OrderDtos.RiderInfo;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.TimelineResponse;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.TimelineStop;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.TrackingResponse;
@@ -281,13 +281,14 @@ public class CustomerOrderService {
         BillSummary bill = orderViews.bill(order);
         var address = order.getDeliveryAddressId() == null ? null
                 : addresses.findById(order.getDeliveryAddressId()).map(CustomerAddressService::toResponse).orElse(null);
-        AgentInfo agent = order.getDeliveryAgentId() == null ? null
-                : agents.findById(order.getDeliveryAgentId()).map(CustomerOrderService::toAgentInfo).orElse(null);
+        RiderInfo rider = order.getDeliveryAgentId() == null ? null
+                : agents.findById(order.getDeliveryAgentId()).map(CustomerOrderService::toRiderInfo).orElse(null);
         boolean otpVisible = OrderStatus.ACTIVE.contains(order.getStatus());
         return new OrderDetail(order.getId(), order.getStatus(),
                 lines.stream().filter(l -> l.getType() == ItemType.FOOD).map(CustomerOrderService::toLine).toList(),
                 lines.stream().filter(l -> l.getType() == ItemType.GROCERY).map(CustomerOrderService::toLine).toList(),
-                bill, address, agent, otpVisible ? order.getDeliveryOtp() : null, orderViews.stops(order), order.getCreatedAt());
+                bill, orderViews.missingItems(order), address, rider, otpVisible ? order.getDeliveryOtp() : null,
+                isCancellable(order), orderViews.stops(order), order.getCreatedAt());
     }
 
     static CartItemResponse toLine(OrderItem item) {
@@ -295,10 +296,15 @@ public class CustomerOrderService {
                 item.getName(), item.getUnitPrice(), item.getQuantity(), item.getLineTotal(), item.getZone());
     }
 
-    private static AgentInfo toAgentInfo(DeliveryAgent agent) {
-        String phone = agent.getPhone();
-        String masked = phone == null || phone.length() < 4 ? phone : "XXXXXX" + phone.substring(phone.length() - 4);
-        return new AgentInfo(agent.getName(), masked, agent.getVehicleNumber(), GeoUtils.fromPoint(agent.getCurrentLocation()));
+    private static RiderInfo toRiderInfo(DeliveryAgent agent) {
+        // TODO(edge-case): mask the number / route calls through a masking provider.
+        return new RiderInfo(agent.getName(), agent.getPhone(), agent.getVehicleNumber(), GeoUtils.fromPoint(agent.getCurrentLocation()));
+    }
+
+    /** Before anything has been picked up. */
+    private static boolean isCancellable(UnifiedOrder order) {
+        return CANCELLABLE.contains(order.getStatus())
+                && order.getFoodStatus() != PartStatus.PICKED_UP && order.getGroceryStatus() != PartStatus.PICKED_UP;
     }
 
     private String storeName(UUID merchantId) {

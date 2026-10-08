@@ -35,13 +35,13 @@ class TripFlowTest extends IntegrationTest {
                 "{\"addressId\":\"%s\",\"paymentMethod\":\"UPI\"}".formatted(home), 201), "$.orderId");
 
         // Parallel dispatch: the Kirana gets the broadcast and the nearest rider gets the offer.
-        String broadcast = awaitNonEmpty("/api/v1/merchant/broadcasts", kirana.token(), "$");
-        assertThat((Boolean) read(post("/api/v1/merchant/broadcasts/" + read(broadcast, "$[0].broadcastId") + "/claim",
+        String broadcast = awaitNonEmpty("/api/v1/merchant/broadcasts", kirana.token(), "$.items");
+        assertThat((Boolean) read(post("/api/v1/merchant/broadcasts/" + read(broadcast, "$.items[0].broadcastId") + "/claim",
                 kirana.token(), null), "$.claimed")).isTrue();
-        String offers = awaitNonEmpty("/api/v1/agent/offers", rider.token(), "$");
-        assertThat((Double) read(offers, "$[0].estimatedEarnings")).isEqualTo(40.0);
+        String offers = awaitNonEmpty("/api/v1/agent/offers", rider.token(), "$.items");
+        assertThat((Double) read(offers, "$.items[0].estimatedEarnings")).isEqualTo(40.0);
 
-        String route = post("/api/v1/agent/offers/" + read(offers, "$[0].offerId") + "/accept", rider.token(), null);
+        String route = post("/api/v1/agent/offers/" + read(offers, "$.items[0].offerId") + "/accept", rider.token(), null);
         assertThat((List<String>) read(route, "$.stops[*].type")).containsExactly("KIRANA", "RESTAURANT", "CUSTOMER");
         assertThat((String) read(get("/api/v1/customer/orders/" + orderId, customer.token()), "$.status")).isEqualTo("PICKING");
         String kiranaStop = read(route, "$.stops[0].stopId");
@@ -80,7 +80,7 @@ class TripFlowTest extends IntegrationTest {
 
         // Rider: base ₹30 + ₹10 for the second pickup.
         String earnings = get("/api/v1/agent/earnings?period=TODAY", rider.token());
-        assertThat((Integer) read(earnings, "$.deliveries")).isEqualTo(1);
+        assertThat((Integer) read(earnings, "$.tripCount")).isEqualTo(1);
         assertThat((Double) read(earnings, "$.total")).isEqualTo(40.0);
         assertThat((Integer) read(get("/api/v1/agent/deliveries", rider.token()), "$.items[0].stops")).isEqualTo(3);
 

@@ -15,7 +15,8 @@ public final class CatalogDtos {
             UUID id,
             String name,
             List<String> cuisines,
-            BigDecimal rating,
+            /** Average stars to one decimal (not money), null until rated. */
+            Double rating,
             int distanceMeters,
             int etaMinutes,
             boolean open,
@@ -52,6 +53,10 @@ public final class CatalogDtos {
             String category,
             TemperatureZone zone,
             String imageUrl) {
+    }
+
+    /** A grocery category nearby and how many distinct products it has. */
+    public record GroceryCategory(String category, long itemCount) {
     }
 
     public record SearchResponse(

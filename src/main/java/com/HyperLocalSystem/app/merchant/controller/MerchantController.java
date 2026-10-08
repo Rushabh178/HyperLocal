@@ -2,6 +2,7 @@ package com.HyperLocalSystem.app.merchant.controller;
 
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.AuthResponse;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.ChangePasswordRequest;
+import com.HyperLocalSystem.app.common.api.EarningsPeriod;
 import com.HyperLocalSystem.app.common.api.PageResponse;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.AcceptOrderRequest;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.AvailabilityRequest;
@@ -16,6 +17,7 @@ import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.PrepDelayRequest;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.StoreQrResponse;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.StoreStatusRequest;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantDocumentRequest;
+import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantEarnings;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantDocumentsResponse;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.UpdateMerchantProfileRequest;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.UploadRequest;
@@ -97,8 +99,17 @@ public class MerchantController {
     // ---- Kirana: broadcast + QR ----
 
     @GetMapping("/broadcasts")
-    public List<KiranaBroadcast> broadcasts(@AuthenticationPrincipal Jwt jwt) {
-        return merchantService.openBroadcasts(CurrentUser.id(jwt));
+    public PageResponse<KiranaBroadcast> broadcasts(@AuthenticationPrincipal Jwt jwt) {
+        return PageResponse.all(merchantService.openBroadcasts(CurrentUser.id(jwt)));
+    }
+
+    /** Settled orders and their total for the period, plus the payouts (paged). */
+    @GetMapping("/earnings")
+    public MerchantEarnings earnings(@AuthenticationPrincipal Jwt jwt,
+                                     @RequestParam(defaultValue = "TODAY") EarningsPeriod period,
+                                     @RequestParam(defaultValue = "0") int page,
+                                     @RequestParam(defaultValue = "20") int size) {
+        return merchantService.earnings(CurrentUser.id(jwt), period, page, size);
     }
 
     /** The single "Items in Hand" button. */

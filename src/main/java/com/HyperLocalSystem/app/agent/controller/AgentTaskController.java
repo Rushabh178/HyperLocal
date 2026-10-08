@@ -3,16 +3,16 @@ package com.HyperLocalSystem.app.agent.controller;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.ActiveRouteResponse;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.DeliverRequest;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.DeliveryHistoryItem;
-import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.EarningsPeriod;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.EarningsSummary;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.KiranaQrScanRequest;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.MarkDeficientRequest;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.MarkMissingRequest;
-import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.PayoutItem;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.RejectOfferRequest;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.TaskOffer;
 import com.HyperLocalSystem.app.agent.service.AgentTaskService;
+import com.HyperLocalSystem.app.common.api.EarningsPeriod;
 import com.HyperLocalSystem.app.common.api.PageResponse;
+import com.HyperLocalSystem.app.common.api.PayoutItem;
 import com.HyperLocalSystem.app.security.CurrentUser;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -41,8 +41,8 @@ public class AgentTaskController {
     // ---- offers ----
 
     @GetMapping("/offers")
-    public List<TaskOffer> offers(@AuthenticationPrincipal Jwt jwt) {
-        return taskService.offers(CurrentUser.id(jwt));
+    public PageResponse<TaskOffer> offers(@AuthenticationPrincipal Jwt jwt) {
+        return PageResponse.all(taskService.offers(CurrentUser.id(jwt)));
     }
 
     @PostMapping("/offers/{offerId}/accept")
@@ -118,10 +118,13 @@ public class AgentTaskController {
         return taskService.history(CurrentUser.id(jwt), page, size);
     }
 
+    /** Totals and trip count for the period, today's online minutes, and the payouts (paged). */
     @GetMapping("/earnings")
     public EarningsSummary earnings(@AuthenticationPrincipal Jwt jwt,
-                                    @RequestParam(defaultValue = "TODAY") EarningsPeriod period) {
-        return taskService.earnings(CurrentUser.id(jwt), period);
+                                    @RequestParam(defaultValue = "TODAY") EarningsPeriod period,
+                                    @RequestParam(defaultValue = "0") int page,
+                                    @RequestParam(defaultValue = "20") int size) {
+        return taskService.earnings(CurrentUser.id(jwt), period, page, size);
     }
 
     @GetMapping("/earnings/payouts")

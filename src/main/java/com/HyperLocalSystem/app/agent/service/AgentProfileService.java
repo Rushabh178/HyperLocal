@@ -10,11 +10,13 @@ import com.HyperLocalSystem.app.agent.dto.AgentDtos.DutyResponse;
 import com.HyperLocalSystem.app.agent.dto.AgentDtos.LocationUpdateRequest;
 import com.HyperLocalSystem.app.agent.dto.AgentDtos.UpdateAgentProfileRequest;
 import com.HyperLocalSystem.app.agent.entity.AgentDocument;
+import com.HyperLocalSystem.app.agent.entity.AgentDutySession;
 import com.HyperLocalSystem.app.agent.entity.DeliveryAgent;
 import com.HyperLocalSystem.app.agent.entity.DocumentType;
 import com.HyperLocalSystem.app.agent.entity.DutyStatus;
 import com.HyperLocalSystem.app.agent.entity.VerificationStatus;
 import com.HyperLocalSystem.app.agent.repository.AgentDocumentRepository;
+import com.HyperLocalSystem.app.agent.repository.AgentDutySessionRepository;
 import com.HyperLocalSystem.app.agent.repository.DeliveryAgentRepository;
 import com.HyperLocalSystem.app.common.exception.ApiException;
 import com.HyperLocalSystem.app.common.geo.GeoUtils;
@@ -28,6 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
@@ -42,6 +45,7 @@ public class AgentProfileService {
     private final AgentDocumentRepository documents;
     private final SpatialIndexService spatialIndex;
     private final FileStorage fileStorage;
+    private final AgentDutySessionRepository dutySessions;
     private final ApplicationEventPublisher events;
 
     private static final Duration UPLOAD_URL_TTL = Duration.ofMinutes(15);
@@ -143,12 +147,15 @@ public class AgentProfileService {
             }
             if (agent.getDutyStatus() == DutyStatus.OFFLINE || agent.getDutyStatus() == null) {
                 agent.setDutyStatus(DutyStatus.AVAILABLE);
+                dutySessions.save(new AgentDutySession(agentId, Instant.now()));
             }
         } else {
             if (agent.getDutyStatus() == DutyStatus.ACTIVE) {
                 throw ApiException.conflict("DELIVERY_IN_PROGRESS", "Finish your current deliveries before going offline");
             }
             agent.setDutyStatus(DutyStatus.OFFLINE);
+            dutySessions.findFirstByAgentIdAndEndedAtIsNull(agentId).ifPresent(session -> session.setEndedAt(Instant.now()));
+            // TODO(edge-case): close sessions of riders whose app died without going offline (no location for N minutes).
         }
         return new DutyResponse(agent.getDutyStatus());
     }

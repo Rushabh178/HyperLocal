@@ -1,6 +1,5 @@
 package com.HyperLocalSystem.app.cart.dto;
 
-import com.HyperLocalSystem.app.catalog.dto.CatalogDtos.MenuItem;
 import com.HyperLocalSystem.app.common.model.TemperatureZone;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -60,12 +59,24 @@ public final class CartDtos {
             BigDecimal netTotal) {
     }
 
+    /** A dish offered by the nudge; add it with POST /cart/items {itemType: FOOD, itemId, restaurantId}. */
+    public record SuggestedMeal(
+            UUID itemId,
+            UUID restaurantId,
+            String restaurantName,
+            String name,
+            String description,
+            BigDecimal price,
+            boolean veg,
+            String imageUrl) {
+    }
+
     /** Shown when a grocery-only cart is under the threshold (₹150): add a meal to unlock free delivery. */
     public record CartNudge(
             BigDecimal groceryTotal,
             BigDecimal threshold,
             String message,
-            List<MenuItem> suggestedMeals) {
+            List<SuggestedMeal> suggestedMeals) {
     }
 
     public record CartResponse(

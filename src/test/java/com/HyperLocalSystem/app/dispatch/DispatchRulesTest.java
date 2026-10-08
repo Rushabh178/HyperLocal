@@ -24,13 +24,13 @@ class DispatchRulesTest extends IntegrationTest {
         String orderId = foodOrder(customer, restaurant.id(), dish, point(0, -300));
 
         String offer = awaitOffer(nearRider);
-        call(HttpMethod.POST, "/api/v1/agent/offers/" + read(offer, "$[0].offerId") + "/reject", nearRider.token(),
+        call(HttpMethod.POST, "/api/v1/agent/offers/" + read(offer, "$.items[0].offerId") + "/reject", nearRider.token(),
                 "{\"reason\":\"Tyre puncture\"}", 204);
         String next = awaitOffer(farRider);
-        assertThat((List<String>) read(next, "$[0].orderIds")).containsExactly(orderId);
-        assertThat((List<?>) read(get("/api/v1/agent/offers", nearRider.token()), "$")).isEmpty();
+        assertThat((List<String>) read(next, "$.items[0].orderIds")).containsExactly(orderId);
+        assertThat((List<?>) read(get("/api/v1/agent/offers", nearRider.token()), "$.items")).isEmpty();
 
-        post("/api/v1/agent/offers/" + read(next, "$[0].offerId") + "/accept", farRider.token(), null);
+        post("/api/v1/agent/offers/" + read(next, "$.items[0].offerId") + "/accept", farRider.token(), null);
         assertThat((String) read(get("/api/v1/agent/me", farRider.token()), "$.dutyStatus")).isEqualTo("ACTIVE");
 
         post("/api/v1/customer/orders/" + orderId + "/cancel", customer.token(), "{\"reason\":\"Ordered twice\"}");
@@ -51,11 +51,11 @@ class DispatchRulesTest extends IntegrationTest {
                 "{\"addressId\":\"%s\",\"paymentMethod\":\"UPI\"}".formatted(home), 201);
 
         // Round 1 (500 m) reaches only the near shop; it stays silent, so round 2 (1 km) reaches the far one.
-        await().atMost(Duration.ofSeconds(5)).until(() -> !((List<?>) read(get("/api/v1/merchant/broadcasts", nearKirana.token()), "$")).isEmpty());
-        assertThat((List<?>) read(get("/api/v1/merchant/broadcasts", farKirana.token()), "$")).isEmpty();
-        await().atMost(Duration.ofSeconds(15)).until(() -> !((List<?>) read(get("/api/v1/merchant/broadcasts", farKirana.token()), "$")).isEmpty());
+        await().atMost(Duration.ofSeconds(5)).until(() -> !((List<?>) read(get("/api/v1/merchant/broadcasts", nearKirana.token()), "$.items")).isEmpty());
+        assertThat((List<?>) read(get("/api/v1/merchant/broadcasts", farKirana.token()), "$.items")).isEmpty();
+        await().atMost(Duration.ofSeconds(15)).until(() -> !((List<?>) read(get("/api/v1/merchant/broadcasts", farKirana.token()), "$.items")).isEmpty());
         String round2 = get("/api/v1/merchant/broadcasts", farKirana.token());
-        assertThat((Boolean) read(post("/api/v1/merchant/broadcasts/" + read(round2, "$[0].broadcastId") + "/claim",
+        assertThat((Boolean) read(post("/api/v1/merchant/broadcasts/" + read(round2, "$.items[0].broadcastId") + "/claim",
                 farKirana.token(), null), "$.claimed")).isTrue();
     }
 
@@ -87,7 +87,7 @@ class DispatchRulesTest extends IntegrationTest {
         String[] body = new String[1];
         await().atMost(Duration.ofSeconds(15)).pollInterval(Duration.ofMillis(200)).until(() -> {
             body[0] = get("/api/v1/agent/offers", rider.token());
-            return !((List<?>) read(body[0], "$")).isEmpty();
+            return !((List<?>) read(body[0], "$.items")).isEmpty();
         });
         return body[0];
     }

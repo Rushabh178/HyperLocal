@@ -44,7 +44,8 @@ public final class OrderDtos {
             Instant createdAt) {
     }
 
-    public record AgentInfo(String name, String maskedPhone, String vehicleNumber, GeoPoint location) {
+    /** The rider carrying the order. {@code phone} is the full number for now. */
+    public record RiderInfo(String name, String phone, String vehicleNumber, GeoPoint location) {
     }
 
     public record OrderDetail(
@@ -53,9 +54,11 @@ public final class OrderDtos {
             List<CartItemResponse> foodItems,
             List<CartItemResponse> groceryItems,
             BillSummary bill,
+            List<MissingItem> missingItems,
             AddressResponse deliveryAddress,
-            AgentInfo agent,
+            RiderInfo rider,
             String deliveryOtp,
+            boolean cancellable,
             List<TrackingStop> stops,
             Instant createdAt) {
     }

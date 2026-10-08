@@ -1,5 +1,6 @@
 package com.HyperLocalSystem.app.catalog.service;
 
+import com.HyperLocalSystem.app.catalog.dto.CatalogDtos.GroceryCategory;
 import com.HyperLocalSystem.app.catalog.dto.CatalogDtos.GroceryItem;
 import com.HyperLocalSystem.app.catalog.dto.CatalogDtos.MenuCategory;
 import com.HyperLocalSystem.app.catalog.dto.CatalogDtos.MenuItem;
@@ -94,6 +95,17 @@ public class CatalogService {
                 PageResponse.request(page, size)), CatalogService::toGroceryItem);
     }
 
+    /** Categories of the virtual warehouse near the pin, with how many distinct products each has. */
+    @Transactional(readOnly = true)
+    public PageResponse<GroceryCategory> groceryCategories(double lat, double lng, int page, int size) {
+        List<UUID> kiranas = openNearby(MerchantType.KIRANA, lat, lng);
+        if (kiranas.isEmpty()) {
+            return new PageResponse<>(List.of(), Math.max(page, 0), PageResponse.request(page, size).getPageSize(), 0);
+        }
+        return PageResponse.of(items.findGroceryCategories(kiranas, PageResponse.request(page, size)),
+                row -> new GroceryCategory(row.getCategory(), row.getItemCount()));
+    }
+
     /** One search box: matching restaurants (name or cuisine), dishes and groceries nearby. */
     @Transactional(readOnly = true)
     public SearchResponse search(double lat, double lng, String query) {
@@ -155,9 +167,9 @@ public class CatalogService {
         return csv == null || csv.isBlank() ? List.of() : Arrays.stream(csv.split(",")).map(String::trim).toList();
     }
 
-    private static BigDecimal rating(NearbyMerchant row) {
+    private static Double rating(NearbyMerchant row) {
         return row.getRatingCount() == 0 ? null : BigDecimal.valueOf(row.getRatingSum())
-                .divide(BigDecimal.valueOf(row.getRatingCount()), 1, RoundingMode.HALF_UP);
+                .divide(BigDecimal.valueOf(row.getRatingCount()), 1, RoundingMode.HALF_UP).doubleValue();
     }
 
     private static GroceryItem toGroceryItem(GroceryRow row) {

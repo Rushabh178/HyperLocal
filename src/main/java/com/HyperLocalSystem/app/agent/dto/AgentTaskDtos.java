@@ -1,5 +1,8 @@
 package com.HyperLocalSystem.app.agent.dto;
 
+import com.HyperLocalSystem.app.common.api.EarningsPeriod;
+import com.HyperLocalSystem.app.common.api.PageResponse;
+import com.HyperLocalSystem.app.common.api.PayoutItem;
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
 import com.HyperLocalSystem.app.common.model.StopState;
 import com.HyperLocalSystem.app.common.model.StopType;
@@ -96,21 +99,21 @@ public final class AgentTaskDtos {
             Instant completedAt) {
     }
 
-    public enum EarningsPeriod { TODAY, WEEK, MONTH }
-
-    /** Single base payout per trip plus multi-stop / batching incentive bonuses. */
+    /**
+     * Single base payout per trip plus multi-stop / batching incentive bonuses, in the same style as
+     * the merchant earnings. {@code onlineMinutes} is always for today.
+     */
     public record EarningsSummary(
             EarningsPeriod period,
             LocalDate from,
             LocalDate to,
-            int deliveries,
+            int tripCount,
             int batchedInjections,
             BigDecimal basePay,
             BigDecimal multiStopBonus,
             BigDecimal incentives,
-            BigDecimal total) {
-    }
-
-    public record PayoutItem(UUID payoutId, BigDecimal amount, String status, String utr, Instant paidAt) {
+            BigDecimal total,
+            long onlineMinutes,
+            PageResponse<PayoutItem> payouts) {
     }
 }

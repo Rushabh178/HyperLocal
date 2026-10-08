@@ -1,5 +1,6 @@
 package com.HyperLocalSystem.app.customer.controller;
 
+import com.HyperLocalSystem.app.common.api.PageResponse;
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
 import com.HyperLocalSystem.app.customer.dto.CustomerDtos.AddressRequest;
 import com.HyperLocalSystem.app.customer.dto.CustomerDtos.AddressResponse;
@@ -21,7 +22,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -33,8 +33,8 @@ public class CustomerAddressController {
 
     /** Default address first, then most recently updated. */
     @GetMapping
-    public List<AddressResponse> list(@AuthenticationPrincipal Jwt jwt) {
-        return addressService.list(CurrentUser.id(jwt));
+    public PageResponse<AddressResponse> list(@AuthenticationPrincipal Jwt jwt) {
+        return PageResponse.all(addressService.list(CurrentUser.id(jwt)));
     }
 
     @PostMapping

@@ -54,11 +54,11 @@ class MerchantOrderFlowTest extends IntegrationTest {
         call(HttpMethod.POST, "/api/v1/merchant/orders/" + orderId + "/ready", kirana1.token(), null, 404);
 
         // ---- groceries: confirming the order broadcast them to both Kiranas; both tap at once, exactly one wins.
-        await().atMost(Duration.ofSeconds(10)).until(() -> !((List<?>) read(get("/api/v1/merchant/broadcasts", kirana2.token()), "$")).isEmpty());
+        await().atMost(Duration.ofSeconds(10)).until(() -> !((List<?>) read(get("/api/v1/merchant/broadcasts", kirana2.token()), "$.items")).isEmpty());
         String seen = get("/api/v1/merchant/broadcasts", kirana2.token());
-        UUID broadcastId = UUID.fromString(read(seen, "$[0].broadcastId"));
-        assertThat((Double) read(seen, "$[0].payoutAmount")).isEqualTo(60.0);
-        assertThat((List<String>) read(seen, "$[0].items[*].name")).containsExactly("Toned Milk");
+        UUID broadcastId = UUID.fromString(read(seen, "$.items[0].broadcastId"));
+        assertThat((Double) read(seen, "$.items[0].payoutAmount")).isEqualTo(60.0);
+        assertThat((List<String>) read(seen, "$.items[0].items[*].name")).containsExactly("Toned Milk");
 
         CountDownLatch start = new CountDownLatch(1);
         Callable<Boolean> tap1 = () -> tap(start, kirana1, broadcastId);
@@ -79,7 +79,7 @@ class MerchantOrderFlowTest extends IntegrationTest {
         assertThat((String) read(post("/api/v1/merchant/orders/" + orderId + "/ready", winner.token(), null), "$.status"))
                 .isEqualTo("READY");
         assertThat((Integer) read(get("/api/v1/merchant/orders", loser.token()), "$.totalItems")).isZero();
-        assertThat((List<?>) read(get("/api/v1/merchant/broadcasts", loser.token()), "$")).isEmpty();
+        assertThat((List<?>) read(get("/api/v1/merchant/broadcasts", loser.token()), "$.items")).isEmpty();
     }
 
     private boolean tap(CountDownLatch start, Session kirana, UUID broadcastId) throws Exception {

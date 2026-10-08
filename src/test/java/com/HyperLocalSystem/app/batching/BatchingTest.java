@@ -32,8 +32,8 @@ class BatchingTest extends IntegrationTest {
         post("/api/v1/customer/cart/items", first.token(),
                 "{\"itemType\":\"FOOD\",\"itemId\":\"%s\",\"restaurantId\":\"%s\",\"quantity\":1}".formatted(dish, restaurant.id()));
         checkout(first, firstHome);
-        await().atMost(Duration.ofSeconds(15)).until(() -> !((List<?>) read(get("/api/v1/agent/offers", rider.token()), "$")).isEmpty());
-        String offerId = read(get("/api/v1/agent/offers", rider.token()), "$[0].offerId");
+        await().atMost(Duration.ofSeconds(15)).until(() -> !((List<?>) read(get("/api/v1/agent/offers", rider.token()), "$.items")).isEmpty());
+        String offerId = read(get("/api/v1/agent/offers", rider.token()), "$.items[0].offerId");
         post("/api/v1/agent/offers/" + offerId + "/accept", rider.token(), null);
 
         // Second customer, just off the same road, orders only groceries; the Kirana claims them.
@@ -41,8 +41,8 @@ class BatchingTest extends IntegrationTest {
         String secondHome = addAddress(second.token(), point(1200, 60));
         post("/api/v1/customer/cart/items", second.token(), "{\"itemType\":\"GROCERY\",\"itemId\":\"%s\",\"quantity\":2}".formatted(milk));
         String secondOrder = checkout(second, secondHome);
-        await().atMost(Duration.ofSeconds(15)).until(() -> !((List<?>) read(get("/api/v1/merchant/broadcasts", kirana.token()), "$")).isEmpty());
-        String broadcastId = read(get("/api/v1/merchant/broadcasts", kirana.token()), "$[0].broadcastId");
+        await().atMost(Duration.ofSeconds(15)).until(() -> !((List<?>) read(get("/api/v1/merchant/broadcasts", kirana.token()), "$.items")).isEmpty());
+        String broadcastId = read(get("/api/v1/merchant/broadcasts", kirana.token()), "$.items[0].broadcastId");
         post("/api/v1/merchant/broadcasts/" + broadcastId + "/claim", kirana.token(), null);
 
         // Injected, not offered: the rider's route becomes Restaurant → Kirana → Customer 2 → Customer 1.
@@ -51,7 +51,7 @@ class BatchingTest extends IntegrationTest {
         String route = get("/api/v1/agent/route", rider.token());
         assertThat((List<String>) read(route, "$.stops[*].type")).containsExactly("RESTAURANT", "KIRANA", "CUSTOMER", "CUSTOMER");
         assertThat((List<String>) read(route, "$.stops[2].orderIds")).containsExactly(secondOrder);
-        assertThat((List<?>) read(get("/api/v1/agent/offers", rider.token()), "$")).isEmpty();
+        assertThat((List<?>) read(get("/api/v1/agent/offers", rider.token()), "$.items")).isEmpty();
 
         String earnings = get("/api/v1/agent/earnings?period=TODAY", rider.token());
         assertThat((Integer) read(earnings, "$.batchedInjections")).isEqualTo(1);

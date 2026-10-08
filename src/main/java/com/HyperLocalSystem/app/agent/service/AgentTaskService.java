@@ -3,21 +3,22 @@ package com.HyperLocalSystem.app.agent.service;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.ActiveRouteResponse;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.DeliverRequest;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.DeliveryHistoryItem;
-import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.EarningsPeriod;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.EarningsSummary;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.KiranaQrScanRequest;
-import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.PayoutItem;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.RejectOfferRequest;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.TaskOffer;
 import com.HyperLocalSystem.app.agent.entity.AgentEarning;
 import com.HyperLocalSystem.app.agent.entity.DeliveryAgent;
 import com.HyperLocalSystem.app.agent.entity.DutyStatus;
 import com.HyperLocalSystem.app.agent.entity.VerificationStatus;
+import com.HyperLocalSystem.app.agent.repository.AgentDutySessionRepository;
 import com.HyperLocalSystem.app.agent.repository.AgentEarningRepository;
 import com.HyperLocalSystem.app.agent.repository.AgentPayoutRepository;
 import com.HyperLocalSystem.app.agent.repository.DeliveryAgentRepository;
 import com.HyperLocalSystem.app.catalog.entity.ItemType;
+import com.HyperLocalSystem.app.common.api.EarningsPeriod;
 import com.HyperLocalSystem.app.common.api.PageResponse;
+import com.HyperLocalSystem.app.common.api.PayoutItem;
 import com.HyperLocalSystem.app.common.exception.ApiException;
 import com.HyperLocalSystem.app.common.model.StopState;
 import com.HyperLocalSystem.app.common.model.StopType;
@@ -50,11 +51,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.DayOfWeek;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
-import java.time.temporal.TemporalAdjusters;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -69,8 +68,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AgentTaskService {
 
-    private static final ZoneId INDIA = ZoneId.of("Asia/Kolkata");
-
     private final DeliveryAgentRepository agents;
     private final TaskOfferRepository taskOffers;
     private final RiderRouteRepository routes;
@@ -80,6 +77,7 @@ public class AgentTaskService {
     private final OrderItemRepository orderItems;
     private final AgentEarningRepository earnings;
     private final AgentPayoutRepository payouts;
+    private final AgentDutySessionRepository dutySessions;
     private final RoutePlanner routePlanner;
     private final DispatchOrchestrator dispatch;
     private final OrderLifecycle lifecycle;
@@ -294,24 +292,34 @@ public class AgentTaskService {
                 o.getCompletedAt()));
     }
 
-    /** Totals for today / this week (from Monday) / this month, in Indian time. */
+    /** Totals for today / this week (from Monday) / this month in Indian time, today's online minutes, payouts. */
     @Transactional(readOnly = true)
-    public EarningsSummary earnings(UUID agentId, EarningsPeriod period) {
-        LocalDate today = LocalDate.now(INDIA);
-        LocalDate from = switch (period) {
-            case TODAY -> today;
-            case WEEK -> today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-            case MONTH -> today.withDayOfMonth(1);
-        };
+    public EarningsSummary earnings(UUID agentId, EarningsPeriod period, int page, int size) {
+        LocalDate today = LocalDate.now(EarningsPeriod.INDIA);
+        LocalDate from = period.firstDay(today);
         Map<AgentEarning.Type, Object[]> byType = new EnumMap<>(AgentEarning.Type.class);
-        earnings.totalsByType(agentId, from.atStartOfDay(INDIA).toInstant(), today.plusDays(1).atStartOfDay(INDIA).toInstant())
+        earnings.totalsByType(agentId, EarningsPeriod.startOf(from), EarningsPeriod.startOf(today.plusDays(1)))
                 .forEach(row -> byType.put((AgentEarning.Type) row[0], row));
         BigDecimal base = sum(byType, AgentEarning.Type.BASE);
         BigDecimal multiStop = sum(byType, AgentEarning.Type.MULTI_STOP_BONUS);
         BigDecimal incentives = sum(byType, AgentEarning.Type.BATCH_INCENTIVE);
         return new EarningsSummary(period, from, today, (int) count(byType, AgentEarning.Type.BASE),
                 (int) count(byType, AgentEarning.Type.BATCH_INCENTIVE), base, multiStop, incentives,
-                base.add(multiStop).add(incentives));
+                base.add(multiStop).add(incentives), onlineMinutesToday(agentId, today), payouts(agentId, page, size));
+    }
+
+    /** Minutes online since midnight (Indian time), counting a session that is still open up to now. */
+    private long onlineMinutesToday(UUID agentId, LocalDate today) {
+        Instant dayStart = EarningsPeriod.startOf(today);
+        Instant now = Instant.now();
+        long seconds = dutySessions.findOverlapping(agentId, dayStart).stream()
+                .mapToLong(s -> {
+                    Instant start = s.getStartedAt().isAfter(dayStart) ? s.getStartedAt() : dayStart;
+                    Instant end = s.getEndedAt() == null || s.getEndedAt().isAfter(now) ? now : s.getEndedAt();
+                    return Math.max(0, Duration.between(start, end).toSeconds());
+                })
+                .sum();
+        return seconds / 60;
     }
 
     @Transactional(readOnly = true)

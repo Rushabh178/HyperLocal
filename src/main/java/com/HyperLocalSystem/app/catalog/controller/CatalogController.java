@@ -1,5 +1,6 @@
 package com.HyperLocalSystem.app.catalog.controller;
 
+import com.HyperLocalSystem.app.catalog.dto.CatalogDtos.GroceryCategory;
 import com.HyperLocalSystem.app.catalog.dto.CatalogDtos.GroceryItem;
 import com.HyperLocalSystem.app.catalog.dto.CatalogDtos.MenuResponse;
 import com.HyperLocalSystem.app.catalog.dto.CatalogDtos.RestaurantSummary;
@@ -43,6 +44,13 @@ public class CatalogController {
                                                @RequestParam(defaultValue = "0") int page,
                                                @RequestParam(defaultValue = "20") int size) {
         return catalogService.groceries(lat, lng, q, category, page, size);
+    }
+
+    @GetMapping("/groceries/categories")
+    public PageResponse<GroceryCategory> groceryCategories(@RequestParam double lat, @RequestParam double lng,
+                                                           @RequestParam(defaultValue = "0") int page,
+                                                           @RequestParam(defaultValue = "50") int size) {
+        return catalogService.groceryCategories(lat, lng, page, size);
     }
 
     @GetMapping("/search")

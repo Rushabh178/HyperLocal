@@ -5,7 +5,9 @@ import com.HyperLocalSystem.app.agent.repository.DeliveryAgentRepository;
 import com.HyperLocalSystem.app.catalog.entity.CatalogItem;
 import com.HyperLocalSystem.app.catalog.entity.ItemType;
 import com.HyperLocalSystem.app.catalog.repository.CatalogItemRepository;
+import com.HyperLocalSystem.app.common.api.EarningsPeriod;
 import com.HyperLocalSystem.app.common.api.PageResponse;
+import com.HyperLocalSystem.app.common.api.PayoutItem;
 import com.HyperLocalSystem.app.common.exception.ApiException;
 import com.HyperLocalSystem.app.common.geo.GeoUtils;
 import com.HyperLocalSystem.app.common.model.AccountStatus;
@@ -22,6 +24,7 @@ import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.CatalogItemRequest;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.CatalogItemResponse;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.ClaimResponse;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.KiranaBroadcast;
+import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantEarnings;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantOrder;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantOrderStatus;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantProfileResponse;
@@ -31,7 +34,9 @@ import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.UpdateMerchantProfileR
 import com.HyperLocalSystem.app.merchant.entity.ApprovalStatus;
 import com.HyperLocalSystem.app.merchant.entity.Merchant;
 import com.HyperLocalSystem.app.merchant.entity.MerchantType;
+import com.HyperLocalSystem.app.merchant.repository.MerchantPayoutRepository;
 import com.HyperLocalSystem.app.merchant.repository.MerchantRepository;
+import com.HyperLocalSystem.app.payment.repository.MerchantSettlementRepository;
 import com.HyperLocalSystem.app.order.entity.OrderItem;
 import com.HyperLocalSystem.app.order.entity.PartStatus;
 import com.HyperLocalSystem.app.order.entity.UnifiedOrder;
@@ -48,6 +53,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -72,6 +78,8 @@ public class MerchantService {
     private final RouteStopRepository routeStops;
     private final KiranaBroadcastService broadcastService;
     private final StoreQrService storeQrService;
+    private final MerchantSettlementRepository settlements;
+    private final MerchantPayoutRepository merchantPayouts;
     private final ApplicationEventPublisher events;
 
     // ----------------------------------------------------------------- profile
@@ -275,6 +283,22 @@ public class MerchantService {
             case PICKED_UP -> MerchantOrderStatus.PICKED_UP;
             case UNFULFILLED, CANCELLED -> MerchantOrderStatus.CANCELLED;
         };
+    }
+
+    // ---- earnings ----
+
+    /** What the store was settled for in the period (one settlement per picked-up order), and its payouts. */
+    @Transactional(readOnly = true)
+    public MerchantEarnings earnings(UUID merchantId, EarningsPeriod period, int page, int size) {
+        load(merchantId);
+        LocalDate today = LocalDate.now(EarningsPeriod.INDIA);
+        LocalDate from = period.firstDay(today);
+        Object[] totals = settlements.totals(merchantId, EarningsPeriod.startOf(from), EarningsPeriod.startOf(today.plusDays(1))).getFirst();
+        PageResponse<PayoutItem> payoutPage = PageResponse.of(
+                merchantPayouts.findByMerchantIdOrderByCreatedAtDesc(merchantId, PageResponse.request(page, size)),
+                p -> new PayoutItem(p.getId(), p.getAmount(), p.getStatus().name(), p.getUtr(), p.getPaidAt()));
+        // TODO(edge-case): platform commission; today the total is the gross settled amount.
+        return new MerchantEarnings(period, from, today, ((Long) totals[0]).intValue(), (BigDecimal) totals[1], payoutPage);
     }
 
     // ---- menu / items ----

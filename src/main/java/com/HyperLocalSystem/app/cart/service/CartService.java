@@ -6,12 +6,12 @@ import com.HyperLocalSystem.app.cart.dto.CartDtos.CartItemResponse;
 import com.HyperLocalSystem.app.cart.dto.CartDtos.CartItemType;
 import com.HyperLocalSystem.app.cart.dto.CartDtos.CartNudge;
 import com.HyperLocalSystem.app.cart.dto.CartDtos.CartResponse;
+import com.HyperLocalSystem.app.cart.dto.CartDtos.SuggestedMeal;
 import com.HyperLocalSystem.app.cart.dto.CartDtos.UpdateCartItemRequest;
 import com.HyperLocalSystem.app.cart.entity.Cart;
 import com.HyperLocalSystem.app.cart.entity.CartItem;
 import com.HyperLocalSystem.app.cart.repository.CartItemRepository;
 import com.HyperLocalSystem.app.cart.repository.CartRepository;
-import com.HyperLocalSystem.app.catalog.dto.CatalogDtos.MenuItem;
 import com.HyperLocalSystem.app.catalog.entity.CatalogItem;
 import com.HyperLocalSystem.app.catalog.entity.ItemType;
 import com.HyperLocalSystem.app.catalog.repository.CatalogItemRepository;
@@ -239,15 +239,21 @@ public class CartService {
         if (!priced.food().isEmpty() || groceryTotal.signum() == 0 || groceryTotal.compareTo(threshold) >= 0) {
             return null;
         }
-        List<MenuItem> meals = deliveryPin(customerId, priced.cart())
+        List<SuggestedMeal> meals = deliveryPin(customerId, priced.cart())
                 .map(address -> catalogService.openNearby(MerchantType.RESTAURANT,
                         address.getLocation().getY(), address.getLocation().getX()))
                 .filter(ids -> !ids.isEmpty())
                 .map(ids -> catalogItems.findTop5ByMerchantIdInAndTypeAndAvailableTrueOrderByPriceDesc(ids, ItemType.FOOD)
-                        .stream().map(CatalogService::toMenuItem).toList())
+                        .stream().map(this::toSuggestedMeal).toList())
                 .orElse(List.of());
         return new CartNudge(groceryTotal, threshold,
                 "Add a meal from a restaurant nearby and get free delivery", meals);
+    }
+
+    private SuggestedMeal toSuggestedMeal(CatalogItem item) {
+        String restaurant = merchants.findById(item.getMerchantId()).map(Merchant::getStoreName).orElse(null);
+        return new SuggestedMeal(item.getId(), item.getMerchantId(), restaurant, item.getName(), item.getDescription(),
+                item.getPrice(), Boolean.TRUE.equals(item.getVeg()), item.getImageUrl());
     }
 
     /** The cart's chosen address, else the customer's default one. */
