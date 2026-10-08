@@ -85,6 +85,22 @@ public final class MerchantDtos {
     public record ClaimResponse(UUID broadcastId, UUID orderId, boolean claimed, String message) {
     }
 
+    // ----------------------------------------------------------------- live events (data of /user/queue/merchant-events)
+
+    public record OrderCancelledNotice(UUID orderId, String reason) {
+    }
+
+    /** {@code reason}: CLAIMED (another shop was faster), EXPIRED or CANCELLED. */
+    public record BroadcastTakenNotice(UUID broadcastId, UUID orderId, String reason) {
+    }
+
+    public record RiderArrivingNotice(UUID orderId, UUID stopId, String riderName, String riderPhone,
+                                      String vehicleNumber, Instant arrivedAt) {
+    }
+
+    public record OrderPickedUpNotice(UUID orderId, UUID stopId, Instant pickedUpAt) {
+    }
+
     // ----------------------------------------------------------------- orders
 
     public record MerchantOrder(

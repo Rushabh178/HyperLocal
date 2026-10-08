@@ -16,6 +16,8 @@ public interface BroadcastTargetRepository extends JpaRepository<BroadcastTarget
 
     Optional<BroadcastTarget> findByOfferIdAndMerchantId(UUID offerId, UUID merchantId);
 
+    List<BroadcastTarget> findByOfferId(UUID offerId);
+
     /**
      * The nearest open, approved Kiranas in the H3 disk and radius that this order's earlier rounds
      * have not pinged yet.

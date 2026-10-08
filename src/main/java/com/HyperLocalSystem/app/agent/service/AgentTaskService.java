@@ -24,6 +24,8 @@ import com.HyperLocalSystem.app.common.model.StopState;
 import com.HyperLocalSystem.app.common.model.StopType;
 import com.HyperLocalSystem.app.config.AppProperties;
 import com.HyperLocalSystem.app.dispatch.DispatchEvents.RiderNeededEvent;
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.StopChange;
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.StopChangedEvent;
 import com.HyperLocalSystem.app.dispatch.DispatchOrchestrator;
 import com.HyperLocalSystem.app.dispatch.RoutePlanner;
 import com.HyperLocalSystem.app.dispatch.entity.RiderRoute;
@@ -154,6 +156,7 @@ public class AgentTaskService {
         RouteStop stop = currentStop(agentId, stopId);
         stop.setState(StopState.ARRIVED);
         stop.setArrivedAt(Instant.now());
+        events.publishEvent(new StopChangedEvent(stop.getId(), stop.getOrderId(), StopChange.ARRIVED));
         return routeResponse(agentId);
     }
 
@@ -341,9 +344,10 @@ public class AgentTaskService {
         }
     }
 
-    private static void complete(RouteStop stop) {
+    private void complete(RouteStop stop) {
         stop.setState(StopState.COMPLETED);
         stop.setCompletedAt(Instant.now());
+        events.publishEvent(new StopChangedEvent(stop.getId(), stop.getOrderId(), StopChange.COMPLETED));
     }
 
     /** All pickups of the order done → the rider heads to the customer. */

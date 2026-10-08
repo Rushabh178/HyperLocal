@@ -4,6 +4,9 @@ import com.HyperLocalSystem.app.common.exception.ApiException;
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
 import com.HyperLocalSystem.app.common.geo.GeoUtils;
 import com.HyperLocalSystem.app.config.AppProperties;
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.BroadcastCloseReason;
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.BroadcastClosedEvent;
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.BroadcastOpenedEvent;
 import com.HyperLocalSystem.app.dispatch.entity.BroadcastOffer;
 import com.HyperLocalSystem.app.dispatch.entity.BroadcastStatus;
 import com.HyperLocalSystem.app.dispatch.entity.BroadcastTarget;
@@ -79,14 +82,21 @@ public class KiranaBroadcastService {
     @Transactional
     public void advance(BroadcastOffer offer) {
         UnifiedOrder order = orders.findById(offer.getOrderId()).orElseThrow();
+        boolean wasOpen = offer.getStatus() == BroadcastStatus.OPEN;
         if (order.getGroceryStatus() != PartStatus.BROADCASTING || !OrderStatus.ACTIVE.contains(order.getStatus())) {
             offer.setStatus(BroadcastStatus.CANCELLED);
+            if (wasOpen) {
+                events.publishEvent(new BroadcastClosedEvent(offer.getId(), null, BroadcastCloseReason.CANCELLED));
+            }
             return;
         }
         if (offer.getStatus() == BroadcastStatus.SCHEDULED && open(offer)) {
             return;
         }
         offer.setStatus(BroadcastStatus.EXPIRED);
+        if (wasOpen) {
+            events.publishEvent(new BroadcastClosedEvent(offer.getId(), null, BroadcastCloseReason.EXPIRED));
+        }
         if (offer.getRound() >= properties.ops().kiranaBroadcastMaxRounds()) {
             unfulfilled(order);
         } else {
@@ -112,7 +122,7 @@ public class KiranaBroadcastService {
         offer.setStatus(BroadcastStatus.OPEN);
         offer.setExpiresAt(Instant.now().plus(ops.kiranaClaimTimeout()));
         kiranas.forEach(k -> targets.save(new BroadcastTarget(offer.getId(), k.getId(), (int) Math.round(k.getDistanceMeters()))));
-        // TODO(edge-case): push the broadcast to the Kiranas' phones (FCM); for now they poll GET /merchant/broadcasts.
+        events.publishEvent(new BroadcastOpenedEvent(offer.getId()));
         return true;
     }
 
@@ -146,6 +156,7 @@ public class KiranaBroadcastService {
         order.setKiranaId(merchantId);
         order.moveGroceryTo(PartStatus.READY);
         events.publishEvent(new KiranaClaimedEvent(order.getId(), merchantId));
+        events.publishEvent(new BroadcastClosedEvent(broadcastId, merchantId, BroadcastCloseReason.CLAIMED));
         return true;
     }
 
@@ -165,8 +176,12 @@ public class KiranaBroadcastService {
     /** The order was cancelled: close its rounds so no Kirana can claim it any more. */
     @Transactional
     public void cancelFor(UUID orderId) {
-        offers.findByOrderIdAndStatusIn(orderId, List.of(BroadcastStatus.SCHEDULED, BroadcastStatus.OPEN))
-                .forEach(offer -> offer.setStatus(BroadcastStatus.CANCELLED));
+        offers.findByOrderIdAndStatusIn(orderId, List.of(BroadcastStatus.SCHEDULED, BroadcastStatus.OPEN)).forEach(offer -> {
+            if (offer.getStatus() == BroadcastStatus.OPEN) {
+                events.publishEvent(new BroadcastClosedEvent(offer.getId(), null, BroadcastCloseReason.CANCELLED));
+            }
+            offer.setStatus(BroadcastStatus.CANCELLED);
+        });
     }
 
     int radiusForRound(int round) {

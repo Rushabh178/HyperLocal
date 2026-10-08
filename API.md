@@ -324,6 +324,39 @@ Every message on every queue has the same shape; switch on `type`, read `data`:
 ```
 `ROUTE_UPDATED`: the route changed without the rider acting (late Kirana stop, cancelled order); `data` is the same as `GET /agent/route` (empty `stops` when the route is finished).
 
+### Merchant messages (`/user/queue/merchant-events`)
+All of these come from domain events after they commit; nothing is sent from a controller.
+
+`NEW_ORDER` (restaurant): only once the order is `CONFIRMED` (payment held/captured, food status `NEW`), never at checkout while `PENDING`. `data` is the order card of `GET /merchant/orders`.
+```json
+{ "type": "NEW_ORDER", "sentAt": "…",
+  "data": { "orderId": "6f1c…", "status": "NEW", "items": [ { "name": "Veg Biryani", "packSize": null, "quantity": 1 } ],
+            "amount": 180.00, "prepDeadline": null, "riderName": null, "riderEta": null } }
+```
+`ORDER_CANCELLED` (restaurant, and the Kirana if one claimed it):
+```json
+{ "type": "ORDER_CANCELLED", "sentAt": "…", "data": { "orderId": "6f1c…", "reason": "Changed my mind" } }
+```
+`BROADCAST_OFFER` (Kirana): same object as an item of `GET /merchant/broadcasts`; hide it at `expiresAt`.
+```json
+{ "type": "BROADCAST_OFFER", "sentAt": "…",
+  "data": { "broadcastId": "b7a2…", "orderId": "6f1c…", "items": [ { "name": "Toned Milk", "packSize": "500 ml", "quantity": 2 } ],
+            "payoutAmount": 60.00, "distanceMeters": 210, "expiresAt": "2026-10-08T13:21:00Z" } }
+```
+`BROADCAST_TAKEN` (every targeted Kirana except the winner): `reason` is `CLAIMED`, `EXPIRED` or `CANCELLED`.
+```json
+{ "type": "BROADCAST_TAKEN", "sentAt": "…", "data": { "broadcastId": "b7a2…", "orderId": "6f1c…", "reason": "CLAIMED" } }
+```
+`RIDER_ARRIVING`: the rider tapped **Arrived** at this store.
+```json
+{ "type": "RIDER_ARRIVING", "sentAt": "…",
+  "data": { "orderId": "6f1c…", "stopId": "e2d4…", "riderName": "Ravi", "riderPhone": "+919812345678", "vehicleNumber": "MH12AB1234", "arrivedAt": "…" } }
+```
+`ORDER_PICKED_UP`: the rider's QR scan completed this store's stop; close the order card.
+```json
+{ "type": "ORDER_PICKED_UP", "sentAt": "…", "data": { "orderId": "6f1c…", "stopId": "e2d4…", "pickedUpAt": "…" } }
+```
+
 ## Internal engines (no HTTP endpoints)
 | Class | What it does | Status |
 |---|---|---|

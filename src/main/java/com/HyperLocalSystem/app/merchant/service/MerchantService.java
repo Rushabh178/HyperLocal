@@ -101,12 +101,27 @@ public class MerchantService {
         Map<UUID, List<OrderItem>> items = itemsByOrder(orderIds, ItemType.GROCERY);
         Map<UUID, UnifiedOrder> byId = orders.findAllById(orderIds).stream()
                 .collect(Collectors.toMap(UnifiedOrder::getId, Function.identity()));
-        return open.stream().map(offer -> new KiranaBroadcast(offer.getId(), offer.getOrderId(),
-                toBroadcastItems(items.getOrDefault(offer.getOrderId(), List.of())),
-                byId.get(offer.getOrderId()).getGrocerySubtotal(),
-                broadcastTargets.findByOfferIdAndMerchantId(offer.getId(), merchantId)
-                        .map(BroadcastTarget::getDistanceMeters).orElse(0),
-                offer.getExpiresAt())).toList();
+        return open.stream().map(offer -> toBroadcast(offer, byId.get(offer.getOrderId()),
+                items.getOrDefault(offer.getOrderId(), List.of()), merchantId)).toList();
+    }
+
+    /** One broadcast as a given Kirana sees it (used for the BROADCAST_OFFER message too). */
+    @Transactional(readOnly = true)
+    public KiranaBroadcast broadcastView(BroadcastOffer offer, UUID merchantId) {
+        UnifiedOrder order = orders.findById(offer.getOrderId()).orElseThrow();
+        return toBroadcast(offer, order, orderItems.findByOrderIdAndTypeOrderByCreatedAt(order.getId(), ItemType.GROCERY), merchantId);
+    }
+
+    private KiranaBroadcast toBroadcast(BroadcastOffer offer, UnifiedOrder order, List<OrderItem> items, UUID merchantId) {
+        return new KiranaBroadcast(offer.getId(), offer.getOrderId(), toBroadcastItems(items), order.getGrocerySubtotal(),
+                broadcastTargets.findByOfferIdAndMerchantId(offer.getId(), merchantId).map(BroadcastTarget::getDistanceMeters).orElse(0),
+                offer.getExpiresAt());
+    }
+
+    /** The order card for the restaurant (FOOD) or the Kirana (GROCERY), as in GET /merchant/orders. */
+    @Transactional(readOnly = true)
+    public MerchantOrder orderView(UnifiedOrder order, ItemType type) {
+        return toMerchantOrder(order, type, orderItems.findByOrderIdAndTypeOrderByCreatedAt(order.getId(), type));
     }
 
     /** The single "Items in Hand" button. First tap wins; everyone else gets {@code claimed=false}. */
