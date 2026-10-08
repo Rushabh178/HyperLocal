@@ -2,7 +2,26 @@
 
 Base URL: `http://localhost:8080/api/v1`
 
-**Status:** ✅ = working now · 🚧 = stub that returns `501 NOT_IMPLEMENTED` until its logic is written (the method in the service class has a TODO describing it).
+**Status:** ✅ = working now · 🚧 = stub that returns `501 NOT_IMPLEMENTED` (none left). Rarer cases that are not handled yet are marked `TODO(edge-case)` in the code.
+
+## Running locally
+Needs Java 25+, PostgreSQL with PostGIS, and (for tests) Docker.
+1. `cp .env.example .env` and fill it in; `.env` is git-ignored and loaded automatically, real environment variables win.
+2. `./mvnw spring-boot:run`. Hibernate creates/updates the tables, then `db/indexes.sql` adds the GiST and partial unique indexes.
+3. `./mvnw test` runs the integration tests against a throwaway `postgis/postgis` container.
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `DB_PASSWORD` | yes | – | PostgreSQL password |
+| `JWT_SECRET` | yes | – | Base64 of ≥ 32 random bytes (`openssl rand -base64 48`) |
+| `DB_URL` / `DB_USERNAME` | no | `jdbc:postgresql://localhost:5432/hyper_local` / `postgres` | |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` | no | – | first ops admin, created on startup |
+| `PAYMENT_WEBHOOK_SECRET` | prod | dev value | HMAC key for payment callbacks |
+| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | with `razorpay` | – | Razorpay gateway |
+| `OSRM_BASE_URL` | with `osrm` | `http://localhost:5000` | OSRM routing server |
+| `STORAGE_DIR` / `PUBLIC_BASE_URL` | no | `./uploads` / `http://localhost:8080` | local file storage for KYC uploads |
+
+Profiles (`SPRING_PROFILES_ACTIVE`): none = fake payment gateway, haversine routing, local file storage; `razorpay` = Razorpay gateway; `osrm` = OSRM routing.
 
 Concurrent edits of the same order or payment return `409 CONCURRENT_UPDATE`; just retry.
 

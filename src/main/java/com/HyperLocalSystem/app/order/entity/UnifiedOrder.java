@@ -159,8 +159,9 @@ public class UnifiedOrder {
     @Column(columnDefinition = "bigint default 0 not null")
     private long version;
 
+    /** DB default so the column can be added to a table that already has rows. */
     @UpdateTimestamp
-    @Column(name = "updated_at")
+    @Column(name = "updated_at", columnDefinition = "timestamp(6) with time zone default now()")
     private Instant updatedAt;
 
     // ----------------------------------------------------------------- state machine

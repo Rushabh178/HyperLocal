@@ -80,7 +80,8 @@ public class SecurityConfig {
 
     @Bean
     SecretKey jwtSigningKey(AppProperties properties) {
-        byte[] keyBytes = Base64.getDecoder().decode(properties.jwt().secret());
+        // trim(): a stray newline / CR from a .env file or secret manager must not break startup.
+        byte[] keyBytes = Base64.getDecoder().decode(properties.jwt().secret().trim());
         if (keyBytes.length < 32) {
             throw new IllegalStateException("app.jwt.secret must be Base64 of at least 32 bytes");
         }
