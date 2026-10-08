@@ -11,6 +11,8 @@ import com.HyperLocalSystem.app.config.AppProperties;
 import com.HyperLocalSystem.app.dispatch.DispatchEvents.OfferWithdrawnEvent;
 import com.HyperLocalSystem.app.dispatch.DispatchEvents.RiderNeededEvent;
 import com.HyperLocalSystem.app.dispatch.DispatchEvents.RouteChangedEvent;
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.StopChange;
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.StopChangedEvent;
 import com.HyperLocalSystem.app.dispatch.DispatchEvents.WithdrawReason;
 import com.HyperLocalSystem.app.dispatch.DispatchEvents.TaskOfferCreatedEvent;
 import com.HyperLocalSystem.app.dispatch.entity.RiderRoute;
@@ -206,6 +208,7 @@ public class DispatchOrchestrator {
         RouteStop kirana = routePlanner.pickupStop(route, order, StopType.KIRANA, order.getKiranaId());
         kirana.setSequence(sequence);
         stops.save(kirana);
+        events.publishEvent(new StopChangedEvent(kirana.getId(), order.getId(), StopChange.ADDED));
         routeStops.add(kirana);
         routeStops.sort((a, b) -> Integer.compare(a.getSequence(), b.getSequence()));
         routePlanner.refreshEtas(route.getAgentId(), routeStops);

@@ -126,6 +126,7 @@ public class AgentTaskService {
         RiderRoute route = routes.save(new RiderRoute(agentId));
         List<RouteStop> routeStops = stops.saveAll(routePlanner.stopsFor(order, route, 1));
         routePlanner.refreshEtas(agentId, routeStops);
+        events.publishEvent(new StopChangedEvent(null, order.getId(), StopChange.ADDED));
         return routePlanner.toResponse(route, routeStops);
     }
 
@@ -196,6 +197,7 @@ public class AgentTaskService {
             throw ApiException.conflict("ALREADY_MARKED", item.getName() + " is already marked as missing");
         }
         item.setDeficient(true);
+        events.publishEvent(new StopChangedEvent(stop.getId(), stop.getOrderId(), StopChange.ITEMS_UPDATED));
         paymentService.partialRefundToWallet(stop.getOrderId(), item.getLineTotal(), "Missing item: " + item.getName(),
                 "refund:item:" + item.getId());
 
@@ -204,6 +206,7 @@ public class AgentTaskService {
         if (nothingLeft) {
             UnifiedOrder order = loadOrder(stop.getOrderId());
             stop.setState(StopState.SKIPPED);
+            events.publishEvent(new StopChangedEvent(stop.getId(), stop.getOrderId(), StopChange.SKIPPED));
             order.moveGroceryTo(PartStatus.UNFULFILLED);
             if (!order.hasFood()) {
                 RoutePlanner.skipRemaining(stops.findByOrderIdOrderBySequence(order.getId()));

@@ -78,6 +78,7 @@ public class CustomerOrderService {
     private final SpatialIndexService spatialIndex;
     private final RouteStopRepository routeStopRepository;
     private final TrackingService trackingService;
+    private final OrderViews orderViews;
     private final ApplicationEventPublisher events;
 
     /**
@@ -277,8 +278,7 @@ public class CustomerOrderService {
 
     private OrderDetail toDetail(UnifiedOrder order) {
         List<OrderItem> lines = orderItems.findByOrderIdOrderByCreatedAt(order.getId());
-        BillSummary bill = new BillSummary(order.getFoodSubtotal(), order.getGrocerySubtotal(), order.getDeliveryFee(),
-                order.getConvenienceFee(), order.getTaxes(), order.getDiscount(), order.getFinancialTotal());
+        BillSummary bill = orderViews.bill(order);
         var address = order.getDeliveryAddressId() == null ? null
                 : addresses.findById(order.getDeliveryAddressId()).map(CustomerAddressService::toResponse).orElse(null);
         AgentInfo agent = order.getDeliveryAgentId() == null ? null
@@ -287,7 +287,7 @@ public class CustomerOrderService {
         return new OrderDetail(order.getId(), order.getStatus(),
                 lines.stream().filter(l -> l.getType() == ItemType.FOOD).map(CustomerOrderService::toLine).toList(),
                 lines.stream().filter(l -> l.getType() == ItemType.GROCERY).map(CustomerOrderService::toLine).toList(),
-                bill, address, agent, otpVisible ? order.getDeliveryOtp() : null, order.getCreatedAt());
+                bill, address, agent, otpVisible ? order.getDeliveryOtp() : null, orderViews.stops(order), order.getCreatedAt());
     }
 
     static CartItemResponse toLine(OrderItem item) {

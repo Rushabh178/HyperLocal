@@ -99,7 +99,7 @@ public class MerchantNotifications {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
     public void onStopChanged(StopChangedEvent event) {
-        RouteStop stop = stops.findById(event.stopId()).orElse(null);
+        RouteStop stop = event.stopId() == null ? null : stops.findById(event.stopId()).orElse(null);
         if (stop == null || stop.getType() == StopType.CUSTOMER || stop.getMerchantId() == null) {
             return;
         }

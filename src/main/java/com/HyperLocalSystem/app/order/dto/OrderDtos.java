@@ -56,7 +56,24 @@ public final class OrderDtos {
             AddressResponse deliveryAddress,
             AgentInfo agent,
             String deliveryOtp,
+            List<TrackingStop> stops,
             Instant createdAt) {
+    }
+
+    /** How a stop looks to the customer. */
+    public enum TrackingStopStatus { PENDING, ARRIVED, PICKED_UP, SKIPPED, DELIVERED }
+
+    /** {@code stopId} is null until a rider has the order (the stops are only planned then). */
+    public record TrackingStop(UUID stopId, StopType type, String name, TrackingStopStatus status, Instant completedAt) {
+    }
+
+    /** An item the store didn't have; {@code refundAmount} goes back to the customer's wallet. */
+    public record MissingItem(UUID itemId, String name, int quantity, BigDecimal refundAmount) {
+    }
+
+    /** STOPS_UPDATED message: the stop line plus the money side, so refunds show up live. */
+    public record StopsUpdate(UUID orderId, OrderStatus status, List<TrackingStop> stops, List<MissingItem> missingItems,
+                              BillSummary bill) {
     }
 
     /** One icon on the unified timeline; icons light up in sequence as the single courier advances. */
@@ -67,7 +84,8 @@ public final class OrderDtos {
     }
 
     /** Snapshot for the first paint; live updates arrive on the WebSocket user queue /user/queue/tracking. */
-    public record TrackingResponse(UUID orderId, OrderStatus status, GeoPoint agentLocation, Integer etaMinutes, Instant updatedAt) {
+    public record TrackingResponse(UUID orderId, OrderStatus status, GeoPoint agentLocation, Integer etaMinutes,
+                                   List<TrackingStop> stops, Instant updatedAt) {
     }
 
     /** RIDER_LOCATION message: where the rider is and how far this order is. */

@@ -4,10 +4,12 @@ import com.HyperLocalSystem.app.agent.event.AgentLocationUpdatedEvent;
 import com.HyperLocalSystem.app.agent.repository.DeliveryAgentRepository;
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
 import com.HyperLocalSystem.app.common.geo.GeoUtils;
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.StopChangedEvent;
 import com.HyperLocalSystem.app.dispatch.repository.RouteStopRepository;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.RiderLocation;
 import com.HyperLocalSystem.app.order.event.OrderEvents.OrderStatusChangedEvent;
 import com.HyperLocalSystem.app.order.repository.UnifiedOrderRepository;
+import com.HyperLocalSystem.app.order.service.OrderViews;
 import com.HyperLocalSystem.app.order.service.TrackingService;
 import com.HyperLocalSystem.app.realtime.EventType;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +31,7 @@ public class CustomerNotifications {
     private final DeliveryAgentRepository agents;
     private final RouteStopRepository stops;
     private final TrackingService trackingService;
+    private final OrderViews orderViews;
     private final Notifier notifier;
 
     /** ORDER_STATUS carries the full tracking snapshot, so one message repaints the screen. */
@@ -38,6 +41,15 @@ public class CustomerNotifications {
     public void onStatusChanged(OrderStatusChangedEvent event) {
         orders.findById(event.orderId()).ifPresent(order ->
                 notifier.customer(order.getCustomerId(), EventType.ORDER_STATUS, trackingService.snapshot(order)));
+    }
+
+    /** STOPS_UPDATED with the stop line, missing items and the bill after refunds. */
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+    public void onStopChanged(StopChangedEvent event) {
+        orders.findById(event.orderId()).ifPresent(order ->
+                notifier.customer(order.getCustomerId(), EventType.STOPS_UPDATED, orderViews.stopsUpdate(order)));
     }
 
     /** RIDER_LOCATION for every order the rider is still carrying. */

@@ -44,7 +44,10 @@ public final class CartDtos {
             TemperatureZone zone) {
     }
 
-    /** Single flat convenience fee and no grocery minimum, per the unit-economics model. */
+    /**
+     * Single flat convenience fee and no grocery minimum, per the unit-economics model.
+     * {@code refunds}: money already given back (orders only; 0.00 in the cart); {@code netTotal} = total - refunds.
+     */
     public record BillSummary(
             BigDecimal foodSubtotal,
             BigDecimal grocerySubtotal,
@@ -52,7 +55,9 @@ public final class CartDtos {
             BigDecimal convenienceFee,
             BigDecimal taxes,
             BigDecimal discount,
-            BigDecimal total) {
+            BigDecimal total,
+            BigDecimal refunds,
+            BigDecimal netTotal) {
     }
 
     /** Shown when a grocery-only cart is under the threshold (₹150): add a meal to unlock free delivery. */

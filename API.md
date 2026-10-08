@@ -139,11 +139,22 @@ Nudge: a grocery-only cart under ₹150 gets `{groceryTotal, threshold, message,
 |---|---|---|---|
 | POST | `/checkout` `{addressId, paymentMethod UPI/WALLET, upiVpa?}` + optional `Idempotency-Key` header | → 201 `{orderId, status, payableAmount, payment}`. Re-validates and re-prices the cart, freezes it into an order, takes the payment, clears the cart. Same key again returns the first order. Errors: `400 CART_EMPTY`, `400 ADDRESS_NOT_SERVICEABLE`, `409 ITEM_UNAVAILABLE`, `409 STORE_CLOSED`, `409 INSUFFICIENT_WALLET_BALANCE` | ✅ |
 | GET | `/?status&page&size` | newest first | ✅ |
-| GET | `/{id}` | items, bill, address, rider, `deliveryOtp` (4 digits, shown while the order is active) | ✅ |
+| GET | `/{id}` | items, bill, address, rider, `deliveryOtp` (4 digits, shown while the order is active), `stops` | ✅ |
 | GET | `/{id}/timeline` | unified Kirana → Restaurant → Home line | ✅ |
-| GET | `/{id}/tracking` | `{orderId, status, agentLocation, etaMinutes, updatedAt}` snapshot; live updates over WebSocket | ✅ |
+| GET | `/{id}/tracking` | `{orderId, status, agentLocation, etaMinutes, stops, updatedAt}` snapshot; live updates over WebSocket | ✅ |
 | POST | `/{id}/cancel` `{reason}` | only before pickup (`409 ORDER_NOT_CANCELLABLE` / `ORDER_ALREADY_PICKED_UP`); releases the UPI hold or refunds a wallet payment to the wallet | ✅ |
 | POST | `/{id}/rating` `{deliveryRating?, restaurantRating?, kiranaRating?, comment?}` | completed orders only, once (`409 ALREADY_RATED`); updates the stores' average rating | ✅ |
+
+**Stops** (order details, tracking, `ORDER_STATUS` and `STOPS_UPDATED`): the rider's real stops once someone has the order; before that the planned stops with `stopId: null`.
+`status` is `PENDING`, `ARRIVED`, `PICKED_UP` (Kirana / restaurant), `DELIVERED` (customer) or `SKIPPED`.
+```json
+"stops": [
+  { "stopId": "e2d4…", "type": "KIRANA",     "name": "Sharma Kirana", "status": "PICKED_UP", "completedAt": "2026-10-08T13:31:02Z" },
+  { "stopId": "9a01…", "type": "RESTAURANT", "name": "Spice Hub",     "status": "ARRIVED",   "completedAt": null },
+  { "stopId": "77bc…", "type": "CUSTOMER",   "name": "Home",          "status": "PENDING",   "completedAt": null }
+]
+```
+**Bill**: `{foodSubtotal, grocerySubtotal, deliveryFee, convenienceFee, taxes, discount, total, refunds, netTotal}`. `refunds` is what has already gone back to the customer (missing items, unavailable groceries, cancellation) and `netTotal = total - refunds`; in the cart `refunds` is `0.00` and `netTotal = total`.
 
 **Order status** (state machine; illegal moves return `409 ILLEGAL_STATE_TRANSITION`):
 `PENDING → CONFIRMED → (BATCHED →) PICKING → OUT_FOR_DELIVERY → COMPLETED`, and `CANCELLED` from anything before pickup.
@@ -303,6 +314,16 @@ Every message on every queue has the same shape; switch on `type`, read `data`:
 `RIDER_LOCATION`: every time the rider carrying the order sends a location.
 ```json
 { "type": "RIDER_LOCATION", "sentAt": "…", "data": { "orderId": "6f1c…", "location": { "lat": 18.5211, "lng": 73.8570 }, "etaMinutes": 12, "updatedAt": "…" } }
+```
+
+`STOPS_UPDATED`: any stop of the order changed (rider assigned, arrived, picked up, skipped, missing items marked). Carries the stops, the missing items and the bill after refunds, so a refund shows up live.
+```json
+{ "type": "STOPS_UPDATED", "sentAt": "…",
+  "data": { "orderId": "6f1c…", "status": "PICKING",
+            "stops": [ { "stopId": "e2d4…", "type": "KIRANA", "name": "Sharma Kirana", "status": "ARRIVED", "completedAt": null }, … ],
+            "missingItems": [ { "itemId": "41b8…", "name": "Brown Bread", "quantity": 1, "refundAmount": 45.00 } ],
+            "bill": { "foodSubtotal": 0.00, "grocerySubtotal": 165.00, "deliveryFee": 0.00, "convenienceFee": 10.00, "taxes": 0.00,
+                      "discount": 0.00, "total": 175.00, "refunds": 45.00, "netTotal": 130.00 } } }
 ```
 
 ### Rider messages (`/user/queue/route-updates`)

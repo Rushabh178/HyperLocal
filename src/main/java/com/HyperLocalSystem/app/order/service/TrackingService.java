@@ -36,6 +36,7 @@ public class TrackingService {
     private final RiderRouteRepository routes;
     private final RouteStopRepository stops;
     private final RoutingClient routingClient;
+    private final OrderViews orderViews;
 
     /** Rider position and the ETA to this customer along the rider's remaining (locked) route. */
     @Transactional(readOnly = true)
@@ -44,7 +45,7 @@ public class TrackingService {
         GeoPoint position = agent == null ? null : GeoUtils.fromPoint(agent.getCurrentLocation());
         Integer etaMinutes = position != null && OrderStatus.ACTIVE.contains(order.getStatus())
                 ? etaMinutes(agent.getId(), position, order.getId()) : null;
-        return new TrackingResponse(order.getId(), order.getStatus(), position, etaMinutes, Instant.now());
+        return new TrackingResponse(order.getId(), order.getStatus(), position, etaMinutes, orderViews.stops(order), Instant.now());
     }
 
     /** Sum of legs from the rider through every unfinished stop up to this order's drop-off. */

@@ -32,9 +32,12 @@ public final class DispatchEvents {
     public record BroadcastClosedEvent(UUID broadcastId, UUID claimedBy, BroadcastCloseReason reason) {
     }
 
-    public enum StopChange { ADDED, ARRIVED, COMPLETED, SKIPPED }
+    public enum StopChange { ADDED, ARRIVED, COMPLETED, SKIPPED, ITEMS_UPDATED }
 
-    /** One route stop changed (drives RIDER_ARRIVING / ORDER_PICKED_UP and the customer's STOPS_UPDATED). */
+    /**
+     * A route stop of an order changed (drives RIDER_ARRIVING / ORDER_PICKED_UP and the customer's
+     * STOPS_UPDATED). {@code stopId} is null when several stops of the order were created at once.
+     */
     public record StopChangedEvent(UUID stopId, UUID orderId, StopChange change) {
     }
 

@@ -25,7 +25,7 @@ public class BillCalculator {
         BigDecimal grocery = money(grocerySubtotal);
         if (food.signum() == 0 && grocery.signum() == 0) {
             BigDecimal zero = money(BigDecimal.ZERO);
-            return new BillSummary(zero, zero, zero, zero, zero, zero, zero);
+            return new BillSummary(zero, zero, zero, zero, zero, zero, zero, zero, zero);
         }
         BigDecimal deliveryFee = deliveryWaived(food, grocery) ? BigDecimal.ZERO : ops.deliveryFee();
         BigDecimal convenienceFee = ops.convenienceFee();
@@ -33,7 +33,7 @@ public class BillCalculator {
         BigDecimal discount = BigDecimal.ZERO;
         BigDecimal total = food.add(grocery).add(deliveryFee).add(convenienceFee).add(taxes).subtract(discount);
         return new BillSummary(food, grocery, money(deliveryFee), money(convenienceFee), money(taxes),
-                money(discount), money(total));
+                money(discount), money(total), money(BigDecimal.ZERO), money(total));
     }
 
     public boolean deliveryWaived(BigDecimal food, BigDecimal grocery) {

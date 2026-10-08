@@ -9,6 +9,8 @@ import com.HyperLocalSystem.app.common.geo.GeoPoint;
 import com.HyperLocalSystem.app.common.geo.GeoUtils;
 import com.HyperLocalSystem.app.config.AppProperties;
 import com.HyperLocalSystem.app.dispatch.DispatchEvents.OfferWithdrawnEvent;
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.StopChange;
+import com.HyperLocalSystem.app.dispatch.DispatchEvents.StopChangedEvent;
 import com.HyperLocalSystem.app.dispatch.DispatchEvents.WithdrawReason;
 import com.HyperLocalSystem.app.dispatch.RoutePlanner;
 import com.HyperLocalSystem.app.dispatch.entity.RiderRoute;
@@ -167,6 +169,7 @@ public class CoLinearBatchingEngine {
             sequence.get(i).setSequence(first + i);
         }
         stops.saveAll(List.of(pickupStop, dropStop));
+        events.publishEvent(new StopChangedEvent(null, order.getId(), StopChange.ADDED));
         routePlanner.refreshEtas(agentId, sequence);
         route.setUpdatedAt(Instant.now());
 
