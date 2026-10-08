@@ -167,18 +167,32 @@ Sign-up also takes `vehicleType` (MOTORCYCLE/SCOOTER/EV_SCOOTER/BICYCLE), `vehic
 
 ## Merchant app (Kirana + restaurant)
 
-| Method | Path | Status |
-|---|---|---|
-| POST | `/merchant/auth/signup` · `verify-phone` · `login` · `otp/send` · `otp/login` · `refresh` · `logout` | 🚧 |
-| GET | `/merchant/me` · PUT `/merchant/me/store-status` | 🚧 |
-| GET | `/merchant/broadcasts` | 🚧 |
-| POST | `/merchant/broadcasts/{id}/claim` ("Items in Hand") | 🚧 |
-| GET | `/merchant/store-qr` | 🚧 |
-| GET | `/merchant/orders?status` | 🚧 |
-| POST | `/merchant/orders/{id}/accept` `{prepMinutes}` · `/delay` · `/ready` | 🚧 |
-| GET/POST | `/merchant/items` · PUT `/merchant/items/{id}` · PATCH `/merchant/items/{id}/availability` | 🚧 |
+### Auth: `/merchant/auth` (public)
+Same flow as the other apps, but merchants sign in with their **phone number only** (no email login).
+| Method | Path | Body | Status |
+|---|---|---|---|
+| POST | `/signup` | see below | ✅ |
+| POST | `/verify-phone` · `/verify-phone/resend` | `phone, otp` · `phone` | ✅ |
+| POST | `/login` | `identifier` (phone), `password` | ✅ |
+| POST | `/otp/send` · `/otp/login` | `phone` · `phone, otp` | ✅ |
+| POST | `/refresh` · `/logout` | `refreshToken` | ✅ |
+| POST | `/password/forgot` · `/password/reset` | `phone` · `phone, otp, newPassword` | ✅ |
 
-To build merchant auth: add a `Merchant` entity that implements `AuthAccount`, then make `MerchantAuthService` extend `AccountAuthService` the same way `CustomerAuthService` does.
+Sign-up body: `type` (KIRANA/RESTAURANT), `storeName`, `ownerName`, `phone`, `password`, `address`, `pincode`, `location {lat,lng}`, `fssaiNumber` (**required for RESTAURANT**, else `400 FSSAI_REQUIRED`), `gstin?`, `upiVpa?`, `cuisines?` (restaurants, up to 5), `imageUrl?`.
+A new store is `verificationStatus: PENDING` until ops approves it, and cannot open before that (`403 MERCHANT_NOT_APPROVED`).
+
+### Store: `/merchant`
+| Method | Path | Notes | Status |
+|---|---|---|---|
+| GET | `/me` | profile incl. `verificationStatus`, `rejectionReason`, `open` | ✅ |
+| PUT | `/me/password` | `currentPassword, newPassword` | ✅ |
+| PUT | `/me/store-status` | `{open}`; approved stores only | ✅ |
+| GET | `/store-qr` | Kirana only; signed payload `HLQR1.<merchantId>.<exp>.<sig>`, valid 15 min — show it as a QR and refresh before `expiresAt` | ✅ |
+| GET | `/broadcasts` | | 🚧 |
+| POST | `/broadcasts/{id}/claim` ("Items in Hand") | | 🚧 |
+| GET | `/orders?status` | | 🚧 |
+| POST | `/orders/{id}/accept` `{prepMinutes}` · `/delay` · `/ready` | | 🚧 |
+| GET/POST | `/items` · PUT `/items/{id}` · PATCH `/items/{id}/availability` | | 🚧 |
 
 ## Admin: `/admin` (ROLE_ADMIN)
 `GET /agents?status=UNDER_REVIEW` · `POST /agents/{id}/approve` · `POST /agents/{id}/reject` · `POST /agents/{id}/documents/{type}/reject` · `POST /merchants/{id}/approve`: all 🚧, and there is no admin sign-in yet.

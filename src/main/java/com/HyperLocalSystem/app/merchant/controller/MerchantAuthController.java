@@ -1,11 +1,13 @@
 package com.HyperLocalSystem.app.merchant.controller;
 
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.AuthResponse;
+import com.HyperLocalSystem.app.auth.dto.AuthDtos.MessageResponse;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.OtpLoginRequest;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.OtpSentResponse;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.PasswordLoginRequest;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.PhoneRequest;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.RefreshTokenRequest;
+import com.HyperLocalSystem.app.auth.dto.AuthDtos.ResetPasswordRequest;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.SignupResponse;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.VerifyPhoneRequest;
 import com.HyperLocalSystem.app.auth.dto.AuthTokens;
@@ -40,6 +42,12 @@ public class MerchantAuthController {
         return authService.verifyPhone(request);
     }
 
+    @PostMapping("/verify-phone/resend")
+    public OtpSentResponse resendVerificationOtp(@Valid @RequestBody PhoneRequest request) {
+        return authService.resendVerificationOtp(request.phone());
+    }
+
+    /** {@code identifier} must be the phone number; merchants have no email login. */
     @PostMapping("/login")
     public AuthResponse<MerchantProfileResponse> login(@Valid @RequestBody PasswordLoginRequest request) {
         return authService.loginWithPassword(request);
@@ -64,5 +72,15 @@ public class MerchantAuthController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void logout(@Valid @RequestBody RefreshTokenRequest request) {
         authService.logout(request.refreshToken());
+    }
+
+    @PostMapping("/password/forgot")
+    public MessageResponse forgotPassword(@Valid @RequestBody PhoneRequest request) {
+        return authService.forgotPassword(request.phone());
+    }
+
+    @PostMapping("/password/reset")
+    public MessageResponse resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        return authService.resetPassword(request);
     }
 }

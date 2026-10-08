@@ -1,5 +1,7 @@
 package com.HyperLocalSystem.app.merchant.controller;
 
+import com.HyperLocalSystem.app.auth.dto.AuthDtos.AuthResponse;
+import com.HyperLocalSystem.app.auth.dto.AuthDtos.ChangePasswordRequest;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.AcceptOrderRequest;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.AvailabilityRequest;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.CatalogItemRequest;
@@ -12,6 +14,7 @@ import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantProfileRespons
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.PrepDelayRequest;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.StoreQrResponse;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.StoreStatusRequest;
+import com.HyperLocalSystem.app.merchant.service.MerchantAuthService;
 import com.HyperLocalSystem.app.merchant.service.MerchantService;
 import com.HyperLocalSystem.app.security.CurrentUser;
 import jakarta.validation.Valid;
@@ -39,10 +42,18 @@ import java.util.UUID;
 public class MerchantController {
 
     private final MerchantService merchantService;
+    private final MerchantAuthService authService;
 
     @GetMapping("/me")
     public MerchantProfileResponse me(@AuthenticationPrincipal Jwt jwt) {
         return merchantService.profile(CurrentUser.id(jwt));
+    }
+
+    /** Signs out all other devices; the response carries a fresh session for this one. */
+    @PutMapping("/me/password")
+    public AuthResponse<MerchantProfileResponse> changePassword(@AuthenticationPrincipal Jwt jwt,
+                                                                @Valid @RequestBody ChangePasswordRequest request) {
+        return authService.changePassword(CurrentUser.id(jwt), request);
     }
 
     @PutMapping("/me/store-status")

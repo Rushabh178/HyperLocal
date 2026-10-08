@@ -3,6 +3,8 @@ package com.HyperLocalSystem.app.merchant.dto;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos;
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
 import com.HyperLocalSystem.app.common.model.TemperatureZone;
+import com.HyperLocalSystem.app.merchant.entity.ApprovalStatus;
+import com.HyperLocalSystem.app.merchant.entity.MerchantType;
 import com.HyperLocalSystem.app.security.PhoneNumbers;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
@@ -24,8 +26,6 @@ public final class MerchantDtos {
     private MerchantDtos() {
     }
 
-    public enum MerchantType { KIRANA, RESTAURANT }
-
     public enum MerchantOrderStatus { NEW, ACCEPTED, PREPARING, DELAYED, READY, PICKED_UP, CANCELLED }
 
     // ----------------------------------------------------------------- sign up / profile
@@ -42,7 +42,10 @@ public final class MerchantDtos {
             @NotNull @Valid GeoPoint location,
             @Size(max = 14) String fssaiNumber,
             @Size(max = 15) String gstin,
-            @Size(max = 100) String upiVpa) {
+            @Size(max = 100) String upiVpa,
+            /** Restaurants only, e.g. ["North Indian", "Chinese"]. */
+            @Size(max = 5) List<@NotBlank @Size(max = 30) String> cuisines,
+            @Size(max = 500) String imageUrl) {
     }
 
     public record MerchantProfileResponse(
@@ -54,7 +57,8 @@ public final class MerchantDtos {
             String address,
             GeoPoint location,
             boolean open,
-            String verificationStatus,
+            ApprovalStatus verificationStatus,
+            String rejectionReason,
             Instant createdAt) {
     }
 

@@ -1,52 +1,120 @@
 package com.HyperLocalSystem.app.merchant.service;
 
-import com.HyperLocalSystem.app.auth.dto.AuthDtos.AuthResponse;
-import com.HyperLocalSystem.app.auth.dto.AuthDtos.OtpLoginRequest;
-import com.HyperLocalSystem.app.auth.dto.AuthDtos.OtpSentResponse;
-import com.HyperLocalSystem.app.auth.dto.AuthDtos.PasswordLoginRequest;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.SignupResponse;
-import com.HyperLocalSystem.app.auth.dto.AuthDtos.VerifyPhoneRequest;
-import com.HyperLocalSystem.app.auth.dto.AuthTokens;
-import com.HyperLocalSystem.app.common.exception.NotImplementedException;
+import com.HyperLocalSystem.app.auth.entity.OtpPurpose;
+import com.HyperLocalSystem.app.auth.service.AccountAuthService;
+import com.HyperLocalSystem.app.auth.service.OtpService;
+import com.HyperLocalSystem.app.common.exception.ApiException;
+import com.HyperLocalSystem.app.common.geo.GeoUtils;
+import com.HyperLocalSystem.app.common.model.AccountStatus;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantProfileResponse;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantSignupRequest;
+import com.HyperLocalSystem.app.merchant.entity.ApprovalStatus;
+import com.HyperLocalSystem.app.merchant.entity.Merchant;
+import com.HyperLocalSystem.app.merchant.entity.MerchantType;
+import com.HyperLocalSystem.app.merchant.repository.MerchantRepository;
+import com.HyperLocalSystem.app.security.PhoneNumbers;
+import com.HyperLocalSystem.app.security.Role;
+import com.HyperLocalSystem.app.security.TokenService;
+import com.HyperLocalSystem.app.spatial.SpatialIndexService;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.Locale;
+import java.util.Optional;
+import java.util.UUID;
 
 /**
- * TODO: create a {@code Merchant} entity (merchants table: type, store_name, owner_name, phone,
- * password_hash, location geometry(Point,4326), h3_index, is_open, verification_status, upi_vpa, ...)
- * implementing AuthAccount, then make this class extend
- * {@code AccountAuthService<Merchant, MerchantProfileResponse>} exactly like CustomerAuthService.
- * That gives you verify-phone, login, OTP login, refresh, logout and password reset for free.
+ * Kirana / restaurant sign-up and sign-in. Same flow as customers, but a separate account table,
+ * OTPs scoped to MERCHANT and tokens carrying ROLE_MERCHANT. Merchants sign in with their phone
+ * number (no email login). A new store starts PENDING and can't open until ops approves it.
  */
 @Service
-public class MerchantAuthService {
+public class MerchantAuthService extends AccountAuthService<Merchant, MerchantProfileResponse> {
 
+    private final MerchantRepository merchants;
+    private final SpatialIndexService spatialIndex;
+
+    public MerchantAuthService(MerchantRepository merchants, SpatialIndexService spatialIndex, OtpService otpService,
+                               TokenService tokenService, PasswordEncoder passwordEncoder) {
+        super(otpService, tokenService, passwordEncoder);
+        this.merchants = merchants;
+        this.spatialIndex = spatialIndex;
+    }
+
+    /** Creates the store (unverified, PENDING approval) and sends an OTP. An unverified sign-up is reused. */
+    @Transactional
     public SignupResponse signup(MerchantSignupRequest request) {
-        throw new NotImplementedException("Merchant sign-up");
+        String phone = PhoneNumbers.normalize(request.phone());
+        if (request.type() == MerchantType.RESTAURANT && isBlank(request.fssaiNumber())) {
+            throw ApiException.badRequest("FSSAI_REQUIRED", "An FSSAI licence number is required for restaurants");
+        }
+
+        Merchant merchant = merchants.findByPhone(phone).orElseGet(Merchant::new);
+        if (merchant.isPhoneVerified()) {
+            throw ApiException.conflict("PHONE_ALREADY_REGISTERED", "This phone number is already registered. Please sign in.");
+        }
+        if (merchant.getAccountStatus() != AccountStatus.ACTIVE) {
+            throw ApiException.forbidden("ACCOUNT_BLOCKED", "This account cannot be registered. Please contact support.");
+        }
+
+        double lat = request.location().lat();
+        double lng = request.location().lng();
+        merchant.setType(request.type());
+        merchant.setPhone(phone);
+        merchant.setStoreName(request.storeName().trim());
+        merchant.setOwnerName(request.ownerName().trim());
+        merchant.setPasswordHash(passwordEncoder.encode(request.password()));
+        merchant.setAddress(request.address().trim());
+        merchant.setPincode(request.pincode());
+        merchant.setLocation(GeoUtils.toPoint(lat, lng));
+        merchant.setH3Index(spatialIndex.cellOf(lat, lng));
+        merchant.setFssaiNumber(trimToNull(request.fssaiNumber()));
+        merchant.setGstin(isBlank(request.gstin()) ? null : request.gstin().trim().toUpperCase(Locale.ROOT));
+        merchant.setUpiVpa(trimToNull(request.upiVpa()));
+        merchant.setCuisines(request.type() == MerchantType.RESTAURANT && request.cuisines() != null
+                ? String.join(",", request.cuisines().stream().map(String::trim).toList()) : null);
+        merchant.setImageUrl(trimToNull(request.imageUrl()));
+        merchant.setApprovalStatus(ApprovalStatus.PENDING);
+        merchant.setOpen(false);
+        merchants.saveAndFlush(merchant);
+
+        Instant otpExpiresAt = otpService.issue(phone, Role.MERCHANT, OtpPurpose.SIGNUP_VERIFY);
+        return new SignupResponse(merchant.getId(), phone, "VERIFY_PHONE", otpExpiresAt);
     }
 
-    public AuthResponse<MerchantProfileResponse> verifyPhone(VerifyPhoneRequest request) {
-        throw new NotImplementedException("Merchant phone verification");
+    @Override
+    protected Role role() {
+        return Role.MERCHANT;
     }
 
-    public AuthResponse<MerchantProfileResponse> loginWithPassword(PasswordLoginRequest request) {
-        throw new NotImplementedException("Merchant login");
+    @Override
+    protected Optional<Merchant> findByPhone(String normalizedPhone) {
+        return merchants.findByPhone(normalizedPhone);
     }
 
-    public OtpSentResponse sendLoginOtp(String phone) {
-        throw new NotImplementedException("Merchant OTP");
+    @Override
+    protected Optional<Merchant> findByEmail(String normalizedEmail) {
+        return Optional.empty();
     }
 
-    public AuthResponse<MerchantProfileResponse> loginWithOtp(OtpLoginRequest request) {
-        throw new NotImplementedException("Merchant OTP login");
+    @Override
+    protected Optional<Merchant> findById(UUID id) {
+        return merchants.findById(id);
     }
 
-    public AuthTokens refresh(String refreshToken) {
-        throw new NotImplementedException("Merchant token refresh");
+    @Override
+    protected MerchantProfileResponse toProfile(Merchant merchant) {
+        return MerchantService.toResponse(merchant);
     }
 
-    public void logout(String refreshToken) {
-        throw new NotImplementedException("Merchant logout");
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private static String trimToNull(String value) {
+        return isBlank(value) ? null : value.trim();
     }
 }
