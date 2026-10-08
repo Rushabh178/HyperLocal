@@ -2,6 +2,7 @@ package com.HyperLocalSystem.app.merchant.controller;
 
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.AuthResponse;
 import com.HyperLocalSystem.app.auth.dto.AuthDtos.ChangePasswordRequest;
+import com.HyperLocalSystem.app.common.api.PageResponse;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.AcceptOrderRequest;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.AvailabilityRequest;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.CatalogItemRequest;
@@ -107,8 +108,10 @@ public class MerchantController {
     // ---- menu / items ----
 
     @GetMapping("/items")
-    public List<CatalogItemResponse> items(@AuthenticationPrincipal Jwt jwt) {
-        return merchantService.items(CurrentUser.id(jwt));
+    public PageResponse<CatalogItemResponse> items(@AuthenticationPrincipal Jwt jwt,
+                                                   @RequestParam(defaultValue = "0") int page,
+                                                   @RequestParam(defaultValue = "20") int size) {
+        return merchantService.items(CurrentUser.id(jwt), page, size);
     }
 
     @PostMapping("/items")

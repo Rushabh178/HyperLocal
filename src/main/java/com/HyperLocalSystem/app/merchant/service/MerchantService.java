@@ -1,5 +1,9 @@
 package com.HyperLocalSystem.app.merchant.service;
 
+import com.HyperLocalSystem.app.catalog.entity.CatalogItem;
+import com.HyperLocalSystem.app.catalog.entity.ItemType;
+import com.HyperLocalSystem.app.catalog.repository.CatalogItemRepository;
+import com.HyperLocalSystem.app.common.api.PageResponse;
 import com.HyperLocalSystem.app.common.exception.ApiException;
 import com.HyperLocalSystem.app.common.exception.NotImplementedException;
 import com.HyperLocalSystem.app.common.geo.GeoUtils;
@@ -30,6 +34,7 @@ import java.util.UUID;
 public class MerchantService {
 
     private final MerchantRepository merchants;
+    private final CatalogItemRepository catalogItems;
     private final StoreQrService storeQrService;
 
     // ----------------------------------------------------------------- profile
@@ -93,23 +98,62 @@ public class MerchantService {
 
     // ---- menu / items ----
 
-    public List<CatalogItemResponse> items(UUID merchantId) {
-        throw new NotImplementedException("List items");
+    @Transactional(readOnly = true)
+    public PageResponse<CatalogItemResponse> items(UUID merchantId, int page, int size) {
+        return PageResponse.of(catalogItems.findByMerchantIdOrderByCategoryAscNameAsc(merchantId,
+                PageResponse.request(page, size)), MerchantService::toItemResponse);
     }
 
+    /** The item type follows the store: restaurants list FOOD, Kiranas list GROCERY. */
+    @Transactional
     public CatalogItemResponse createItem(UUID merchantId, CatalogItemRequest request) {
-        throw new NotImplementedException("Create item");
+        Merchant merchant = load(merchantId);
+        CatalogItem item = new CatalogItem();
+        item.setMerchantId(merchantId);
+        item.setType(merchant.getType() == MerchantType.RESTAURANT ? ItemType.FOOD : ItemType.GROCERY);
+        apply(item, request);
+        return toItemResponse(catalogItems.save(item));
     }
 
+    @Transactional
     public CatalogItemResponse updateItem(UUID merchantId, UUID itemId, CatalogItemRequest request) {
-        throw new NotImplementedException("Update item");
+        CatalogItem item = loadItem(merchantId, itemId);
+        apply(item, request);
+        return toItemResponse(item);
     }
 
+    @Transactional
     public CatalogItemResponse setAvailability(UUID merchantId, UUID itemId, boolean available) {
-        throw new NotImplementedException("Item availability");
+        CatalogItem item = loadItem(merchantId, itemId);
+        item.setAvailable(available);
+        return toItemResponse(item);
+    }
+
+    private static void apply(CatalogItem item, CatalogItemRequest request) {
+        item.setName(request.name().trim());
+        item.setDescription(trimToNull(request.description()));
+        item.setPrice(request.price());
+        item.setCategory(request.category().trim());
+        item.setVeg(request.veg());
+        item.setZone(request.zone());
+        item.setImageUrl(trimToNull(request.imageUrl()));
+        item.setAvailable(request.available());
+        item.setBrand(trimToNull(request.brand()));
+        item.setPackSize(trimToNull(request.packSize()));
+        item.setMrp(request.mrp());
+        // TODO(edge-case): reject price > mrp, and FOOD items with grocery-only fields.
     }
 
     // ----------------------------------------------------------------- helpers
+
+    private CatalogItem loadItem(UUID merchantId, UUID itemId) {
+        return catalogItems.findByIdAndMerchantId(itemId, merchantId)
+                .orElseThrow(() -> ApiException.notFound("Item"));
+    }
+
+    private static String trimToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
 
     Merchant load(UUID merchantId) {
         return merchants.findById(merchantId)
@@ -122,5 +166,11 @@ public class MerchantService {
                 merchant.getOwnerName(), merchant.getPhone(), merchant.getAddress(),
                 GeoUtils.fromPoint(merchant.getLocation()), merchant.isOpen(), merchant.getApprovalStatus(),
                 merchant.getRejectionReason(), merchant.getCreatedAt());
+    }
+
+    public static CatalogItemResponse toItemResponse(CatalogItem item) {
+        return new CatalogItemResponse(item.getId(), item.getType(), item.getName(), item.getDescription(),
+                item.getPrice(), item.getCategory(), item.getVeg(), item.getZone(), item.getImageUrl(),
+                item.isAvailable(), item.getBrand(), item.getPackSize(), item.getMrp());
     }
 }

@@ -1,6 +1,7 @@
 package com.HyperLocalSystem.app.merchant.dto;
 
 import com.HyperLocalSystem.app.auth.dto.AuthDtos;
+import com.HyperLocalSystem.app.catalog.entity.ItemType;
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
 import com.HyperLocalSystem.app.common.model.TemperatureZone;
 import com.HyperLocalSystem.app.merchant.entity.ApprovalStatus;
@@ -8,6 +9,7 @@ import com.HyperLocalSystem.app.merchant.entity.MerchantType;
 import com.HyperLocalSystem.app.security.PhoneNumbers;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -108,19 +110,27 @@ public final class MerchantDtos {
 
     // ----------------------------------------------------------------- menu / items
 
+    /**
+     * Restaurants add menu items (FOOD), Kiranas add shelf products (GROCERY); the type follows the
+     * store. {@code brand}, {@code packSize} and {@code mrp} are for groceries.
+     */
     public record CatalogItemRequest(
             @NotBlank @Size(max = 120) String name,
             @Size(max = 500) String description,
-            @NotNull @DecimalMin("0.0") BigDecimal price,
+            @NotNull @DecimalMin(value = "0.0", inclusive = false) @Digits(integer = 8, fraction = 2) BigDecimal price,
             @NotBlank @Size(max = 60) String category,
             Boolean veg,
             @NotNull TemperatureZone zone,
             @Size(max = 500) String imageUrl,
-            boolean available) {
+            boolean available,
+            @Size(max = 60) String brand,
+            @Size(max = 30) String packSize,
+            @DecimalMin(value = "0.0", inclusive = false) @Digits(integer = 8, fraction = 2) BigDecimal mrp) {
     }
 
     public record CatalogItemResponse(
             UUID id,
+            ItemType itemType,
             String name,
             String description,
             BigDecimal price,
@@ -128,7 +138,10 @@ public final class MerchantDtos {
             Boolean veg,
             TemperatureZone zone,
             String imageUrl,
-            boolean available) {
+            boolean available,
+            String brand,
+            String packSize,
+            BigDecimal mrp) {
     }
 
     public record AvailabilityRequest(@NotNull Boolean available) {

@@ -114,6 +114,14 @@ public abstract class IntegrationTest {
         return session;
     }
 
+    /** Adds an available item to the merchant's menu/shelf and returns its id. */
+    protected String createItem(String merchantToken, String name, String price, String category, String zone) throws Exception {
+        String item = call(HttpMethod.POST, "/api/v1/merchant/items", merchantToken, """
+                {"name":"%s","price":%s,"category":"%s","zone":"%s","veg":true,"available":true,
+                 "packSize":"500 g","brand":"Acme","mrp":%s}""".formatted(name, price, category, zone, price), 201);
+        return read(item, "$.id");
+    }
+
     private Session verify(String url, String phone, String userId) throws Exception {
         String otp = otps.last("+91" + phone, OtpPurpose.SIGNUP_VERIFY);
         String auth = post(url, null, "{\"phone\":\"%s\",\"otp\":\"%s\"}".formatted(phone, otp));

@@ -192,7 +192,13 @@ A new store is `verificationStatus: PENDING` until ops approves it, and cannot o
 | POST | `/broadcasts/{id}/claim` ("Items in Hand") | | 🚧 |
 | GET | `/orders?status` | | 🚧 |
 | POST | `/orders/{id}/accept` `{prepMinutes}` · `/delay` · `/ready` | | 🚧 |
-| GET/POST | `/items` · PUT `/items/{id}` · PATCH `/items/{id}/availability` | | 🚧 |
+| GET | `/items?page&size` | paginated (`{items, page, size, totalItems}`), by category then name | ✅ |
+| POST | `/items` | see body below → 201 | ✅ |
+| PUT | `/items/{id}` | same body as POST | ✅ |
+| PATCH | `/items/{id}/availability` | `{available}` | ✅ |
+
+Item body: `name`, `description?`, `price` (> 0), `category`, `veg?`, `zone` (HOT/COLD/AMBIENT), `imageUrl?`, `available`, and for groceries `brand?`, `packSize?`, `mrp?`.
+The item's `itemType` follows the store: restaurants create `FOOD`, Kiranas create `GROCERY`. Grocery listings form the "virtual warehouse": customers see products listed by any Kirana within 2 km, and whichever nearby Kirana claims the order fulfils it.
 
 ## Admin: `/admin` (ROLE_ADMIN)
 `GET /agents?status=UNDER_REVIEW` · `POST /agents/{id}/approve` · `POST /agents/{id}/reject` · `POST /agents/{id}/documents/{type}/reject` · `POST /merchants/{id}/approve`: all 🚧, and there is no admin sign-in yet.
