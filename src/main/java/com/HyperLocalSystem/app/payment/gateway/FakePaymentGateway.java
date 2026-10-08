@@ -24,16 +24,17 @@ import java.util.Locale;
 import java.util.UUID;
 
 /**
- * DEVELOPMENT GATEWAY (whenever "razorpay" is off). The outcome of a hold is
- * {@code payments.fake.default-outcome} (SUCCESS), and in the "dev" profile a request can pick it
- * with the header {@code X-Fake-Payment: SUCCESS | PENDING | FAIL}; outside dev the header is ignored.
+ * DEVELOPMENT GATEWAY (only with the "dev" profile, and "razorpay" off). The outcome of a hold is
+ * {@code payments.fake.default-outcome} (SUCCESS), and a request can pick it with the header
+ * {@code X-Fake-Payment: SUCCESS | PENDING | FAIL}. The header is checked against the dev profile again,
+ * so it stays ignored even if this class is ever wired up outside dev.
  * PENDING waits for a webhook {@code {"eventId","reference","type"}} signed with
  * HMAC-SHA256(app.payment.webhook-secret), hex, in the X-Signature header. Capture / release /
  * refund just log.
  */
 @Slf4j
 @Component
-@Profile("!razorpay")
+@Profile("dev & !razorpay")
 public class FakePaymentGateway implements PaymentGateway {
 
     public static final String OUTCOME_HEADER = "X-Fake-Payment";

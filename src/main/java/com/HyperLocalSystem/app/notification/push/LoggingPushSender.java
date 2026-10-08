@@ -4,10 +4,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
-/** DEVELOPMENT DEFAULT: logs pushes instead of sending them, so no Firebase credentials are needed. */
+/** DEVELOPMENT ONLY ("dev" profile, "fcm" off): logs pushes instead of sending them, so no Firebase credentials are needed. */
 @Slf4j
 @Component
-@Profile("!fcm")
+@Profile("dev & !fcm")
 public class LoggingPushSender implements PushSender {
 
     @Override

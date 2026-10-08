@@ -22,7 +22,7 @@ Needs Java 25+, PostgreSQL with PostGIS, and (for tests) Docker.
 | `FIREBASE_CREDENTIALS` | with `fcm` | application-default credentials | path to the Firebase service-account JSON |
 | `STORAGE_DIR` / `PUBLIC_BASE_URL` | no | `./uploads` / `http://localhost:8080` | local file storage for KYC uploads |
 
-Profiles (`SPRING_PROFILES_ACTIVE`): when none is set, `dev` is active (fake payment gateway that honours `X-Fake-Payment`, logged pushes, haversine routing, local file storage). Setting any profile (e.g. `prod,razorpay,fcm`) turns `dev` off; `razorpay` = Razorpay gateway; `osrm` = OSRM routing; `fcm` = real push notifications (otherwise they are logged).
+Profiles (`SPRING_PROFILES_ACTIVE`): there is no default. `dev` must be set explicitly for local development: fake payment gateway that honours `X-Fake-Payment`, logged pushes. Without `dev` the fakes do not exist, `X-Fake-Payment` is ignored, and startup fails unless a real gateway and push sender are configured (e.g. `prod,razorpay,fcm`). `razorpay` = Razorpay gateway; `fcm` = real push notifications; `osrm` = OSRM routing (otherwise haversine).
 
 ### Conventions
 - **Money** is rupees as a JSON number with exactly two decimals, always computed by the server: `"deliveryFee": 25.00`. Show it as is; the apps never calculate money. (Ratings are plain numbers like `4.5`.)
