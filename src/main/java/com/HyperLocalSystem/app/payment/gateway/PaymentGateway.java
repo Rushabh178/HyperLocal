@@ -23,13 +23,16 @@ public interface PaymentGateway {
 
     HoldResult createHold(UUID paymentId, BigDecimal amount, String upiVpa);
 
-    /** Takes (part of) the held amount. */
+    /**
+     * Takes (part of) the held amount. {@code reference} is the payment's gateway payment id when the
+     * gateway gave one, else the hold reference.
+     */
     void capture(String reference, BigDecimal amount);
 
     /** Drops the hold without taking money. */
     void release(String reference);
 
-    /** Returns captured money to the customer's bank account. */
+    /** Returns captured money (or part of it) to the customer's bank account. */
     void refund(String reference, BigDecimal amount);
 
     /** Checks the callback signature over the exact raw body. Must be constant-time. */
@@ -37,8 +40,11 @@ public interface PaymentGateway {
 
     enum WebhookType { HOLD_CONFIRMED, HOLD_FAILED, IGNORED }
 
-    /** {@code eventId} is unique per delivery attempt group and is what makes callbacks idempotent. */
-    record WebhookEvent(String eventId, String reference, WebhookType type) {
+    /**
+     * {@code eventId} is the gateway's id for the event (the same on every redelivery) and is what
+     * makes callbacks idempotent. {@code gatewayPaymentId} is set when the gateway reveals its payment id.
+     */
+    record WebhookEvent(String eventId, String reference, WebhookType type, String gatewayPaymentId) {
     }
 
     WebhookEvent parseWebhook(String rawBody);

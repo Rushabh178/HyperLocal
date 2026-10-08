@@ -1,7 +1,6 @@
 package com.HyperLocalSystem.app.payment.service;
 
 import com.HyperLocalSystem.app.common.exception.ApiException;
-import com.HyperLocalSystem.app.common.exception.NotImplementedException;
 import com.HyperLocalSystem.app.payment.dto.PaymentDtos.PaymentHoldResponse;
 import com.HyperLocalSystem.app.payment.entity.MerchantSettlement;
 import com.HyperLocalSystem.app.payment.entity.Payment;
@@ -11,10 +10,12 @@ import com.HyperLocalSystem.app.payment.gateway.PaymentGateway;
 import com.HyperLocalSystem.app.payment.repository.MerchantSettlementRepository;
 import com.HyperLocalSystem.app.payment.repository.PaymentRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -22,6 +23,7 @@ import java.util.UUID;
  * {@link Payment#moveTo}. Gateway calls happen inside the DB transaction for simplicity.
  * TODO(edge-case): move gateway calls to an outbox so a DB rollback can't orphan a real hold.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PaymentService {
@@ -65,9 +67,58 @@ public class PaymentService {
         return payment;
     }
 
-    /** Retry / re-create the UPI hold for an order (checkout already creates the first one). */
-    public PaymentHoldResponse createHold(UUID customerId, UUID orderId) {
-        throw new NotImplementedException("UPI payment hold retry");
+    /**
+     * Retry after a failed UPI hold: a fresh hold on the same payment row. Returns the payment; the
+     * caller confirms the order if it is already secured.
+     */
+    @Transactional
+    public Payment retryHold(UUID customerId, UUID orderId) {
+        Payment payment = payments.findByOrderId(orderId)
+                .filter(p -> p.getCustomerId().equals(customerId))
+                .orElseThrow(() -> ApiException.notFound("Payment"));
+        if (payment.getMethod() != PaymentMethod.UPI || payment.getStatus() != PaymentStatus.FAILED) {
+            throw ApiException.conflict("HOLD_NOT_RETRYABLE", "Only a failed UPI payment can be retried");
+        }
+        payment.moveTo(PaymentStatus.HOLD_PENDING);
+        PaymentGateway.HoldResult hold = gateway.createHold(payment.getId(), payment.getAmount(), null);
+        payment.setGatewayReference(hold.reference());
+        payment.setGatewayPaymentId(null);
+        payment.setUpiIntentUrl(hold.upiIntentUrl());
+        payment.setExpiresAt(hold.expiresAt());
+        if (hold.status() == PaymentStatus.HELD) {
+            payment.moveTo(PaymentStatus.HELD);
+        }
+        return payment;
+    }
+
+    /**
+     * Applies a verified gateway event to its payment. Returns the payment when this event secured
+     * it (so the caller can confirm the order), else empty. Unknown references are ignored.
+     */
+    @Transactional
+    public Optional<Payment> applyWebhook(PaymentGateway.WebhookEvent event) {
+        Optional<Payment> found = payments.findByGatewayReference(event.reference());
+        if (found.isEmpty()) {
+            log.warn("Payment webhook {} for unknown reference {}", event.eventId(), event.reference());
+            return Optional.empty();
+        }
+        Payment payment = found.get();
+        if (event.gatewayPaymentId() != null) {
+            payment.setGatewayPaymentId(event.gatewayPaymentId());
+        }
+        if (payment.getStatus() != PaymentStatus.HOLD_PENDING) {
+            return Optional.empty();
+        }
+        switch (event.type()) {
+            case HOLD_CONFIRMED -> {
+                payment.moveTo(PaymentStatus.HELD);
+                return Optional.of(payment);
+            }
+            case HOLD_FAILED -> payment.moveTo(PaymentStatus.FAILED);
+            case IGNORED -> {
+            }
+        }
+        return Optional.empty();
     }
 
     @Transactional(readOnly = true)
@@ -76,14 +127,6 @@ public class PaymentService {
                 .filter(payment -> payment.getCustomerId().equals(customerId))
                 .map(PaymentService::toResponse)
                 .orElseThrow(() -> ApiException.notFound("Payment"));
-    }
-
-    /**
-     * Gateway callback. TODO: verify the HMAC signature header BEFORE trusting the body; on
-     * "hold confirmed" confirm the order.
-     */
-    public void handleWebhook(String signature, String rawBody) {
-        throw new NotImplementedException("Payment webhook");
     }
 
     /**
@@ -128,7 +171,7 @@ public class PaymentService {
     private void ensureCaptured(Payment payment) {
         switch (payment.getStatus()) {
             case HELD -> {
-                gateway.capture(payment.getGatewayReference(), payment.getAmount());
+                gateway.capture(chargeReference(payment), payment.getAmount());
                 payment.moveTo(PaymentStatus.CAPTURED);
                 payment.setCapturedAmount(payment.getAmount());
             }
@@ -137,6 +180,11 @@ public class PaymentService {
             case HOLD_PENDING, FAILED, RELEASED ->
                     throw ApiException.conflict("PAYMENT_NOT_SECURED", "The payment for this order is not secured");
         }
+    }
+
+    /** Gateways that capture by payment id get that; the others get the hold reference. */
+    private static String chargeReference(Payment payment) {
+        return payment.getGatewayPaymentId() != null ? payment.getGatewayPaymentId() : payment.getGatewayReference();
     }
 
     private Payment load(UUID orderId) {
@@ -153,7 +201,7 @@ public class PaymentService {
             switch (payment.getStatus()) {
                 case HOLD_PENDING, HELD -> {
                     if (payment.getGatewayReference() != null) {
-                        gateway.release(payment.getGatewayReference());
+                        gateway.release(chargeReference(payment));
                     }
                     payment.moveTo(PaymentStatus.RELEASED);
                 }

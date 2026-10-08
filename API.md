@@ -136,13 +136,16 @@ Deleting the account (`DELETE /customer/me`) is refused with `409 ORDER_IN_PROGR
 ### Payments & wallet
 | Method | Path | Notes | Status |
 |---|---|---|---|
-| POST | `/payments/orders/{orderId}/upi-hold` | retry a failed hold | 🚧 |
+| POST | `/payments/orders/{orderId}/upi-hold` | retry a `FAILED` UPI hold of a `PENDING` order; confirms the order if the new hold succeeds. `409 HOLD_NOT_RETRYABLE` / `ORDER_NOT_AWAITING_PAYMENT` | ✅ |
 | GET | `/payments/orders/{orderId}` | `{paymentId, orderId, amount, status, upiIntentUrl, expiresAt}` | ✅ |
-| POST | `/payments/webhook` (public, gateway signature) | | 🚧 |
+| POST | `/payments/webhook` (public) | gateway callback, authenticated **only** by its HMAC-SHA256 signature header (`X-Signature`, or `X-Razorpay-Signature`), checked before the body is read: `401 INVALID_SIGNATURE`. Idempotent: a redelivered event id is acknowledged and ignored. A confirmed hold confirms the order (dispatch starts); a failed hold marks the payment `FAILED` | ✅ |
 | GET | `/customer/wallet` | `{balance, currency}`; balance = sum of the append-only ledger | ✅ |
 | GET | `/customer/wallet/transactions?page&size` | newest first | ✅ |
 
-Payment status: `HOLD_PENDING → HELD → CAPTURED → PARTIALLY_REFUNDED → REFUNDED`, `HOLD_PENDING/HELD → RELEASED`, `HOLD_PENDING → FAILED`.
+Payment status: `HOLD_PENDING → HELD → CAPTURED → PARTIALLY_REFUNDED → REFUNDED`, `HOLD_PENDING/HELD → RELEASED`, `HOLD_PENDING → FAILED → HOLD_PENDING` (retry).
+Money flow: the hold is captured at the first pickup (Kirana QR / restaurant hand-over), which also records what each store is owed. Missing items and unavailable groceries are refunded to the **wallet**; cancelling releases an uncaptured hold or refunds the rest to the wallet.
+
+Gateways (`PaymentGateway`): the default is a fake that approves holds instantly. **Dev only:** a `upiVpa` ending in `@pending` keeps the hold `HOLD_PENDING` until you post a webhook `{"eventId","reference","type":"HOLD_CONFIRMED"|"HOLD_FAILED"}` signed as hex HMAC-SHA256 of the body with `PAYMENT_WEBHOOK_SECRET`. A Razorpay skeleton runs with the `razorpay` profile (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`).
 
 ---
 

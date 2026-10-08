@@ -2,6 +2,7 @@ package com.HyperLocalSystem.app.payment.controller;
 
 import com.HyperLocalSystem.app.payment.dto.PaymentDtos.PaymentHoldResponse;
 import com.HyperLocalSystem.app.payment.service.PaymentService;
+import com.HyperLocalSystem.app.payment.service.PaymentWebhookService;
 import com.HyperLocalSystem.app.security.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -24,11 +25,12 @@ import java.util.UUID;
 public class PaymentController {
 
     private final PaymentService paymentService;
+    private final PaymentWebhookService webhookService;
 
-    /** Retry / re-create the UPI hold for an order (checkout already creates the first one). */
+    /** Retry a failed UPI hold (checkout already creates the first one). */
     @PostMapping("/orders/{orderId}/upi-hold")
     public PaymentHoldResponse createHold(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID orderId) {
-        return paymentService.createHold(CurrentUser.id(jwt), orderId);
+        return webhookService.retryHold(CurrentUser.id(jwt), orderId);
     }
 
     @GetMapping("/orders/{orderId}")
@@ -36,11 +38,15 @@ public class PaymentController {
         return paymentService.status(CurrentUser.id(jwt), orderId);
     }
 
-    /** Public: called by the payment gateway, authenticated by its signature header. */
+    /**
+     * Public: called by the payment gateway, authenticated by its HMAC signature header
+     * ({@code X-Signature}, or Razorpay's {@code X-Razorpay-Signature}). Redeliveries are no-ops.
+     */
     @PostMapping("/webhook")
     @ResponseStatus(HttpStatus.OK)
     public void webhook(@RequestHeader(name = "X-Signature", required = false) String signature,
+                        @RequestHeader(name = "X-Razorpay-Signature", required = false) String razorpaySignature,
                         @RequestBody String rawBody) {
-        paymentService.handleWebhook(signature, rawBody);
+        webhookService.handle(signature != null ? signature : razorpaySignature, rawBody);
     }
 }

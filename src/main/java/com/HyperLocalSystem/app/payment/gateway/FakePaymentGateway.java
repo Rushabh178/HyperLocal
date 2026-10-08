@@ -19,14 +19,18 @@ import java.util.HexFormat;
 import java.util.UUID;
 
 /**
- * DEVELOPMENT ONLY. Every hold succeeds immediately; capture/release/refund just log. Webhooks are
- * {@code {"eventId","reference","type"}} signed with HMAC-SHA256(app.payment.webhook-secret) in
- * the X-Signature header (hex), so the callback path can be exercised end to end.
+ * DEVELOPMENT ONLY. Holds are approved immediately, except for a UPI id ending in {@code @pending}
+ * (like a payment provider's magic test card), whose hold waits for a webhook. Capture / release /
+ * refund just log. Webhooks are {@code {"eventId","reference","type"}} signed with
+ * HMAC-SHA256(app.payment.webhook-secret), hex, in the X-Signature header.
  */
 @Slf4j
 @Component
 @Profile("!razorpay")
 public class FakePaymentGateway implements PaymentGateway {
+
+    /** UPI ids ending with this keep the hold pending, so the webhook path can be tested. */
+    public static final String PENDING_SUFFIX = "@pending";
 
     private final AppProperties properties;
     private final ObjectMapper objectMapper;
@@ -45,8 +49,10 @@ public class FakePaymentGateway implements PaymentGateway {
     public HoldResult createHold(UUID paymentId, BigDecimal amount, String upiVpa) {
         String reference = "fake_hold_" + paymentId.toString().replace("-", "");
         String intent = "upi://pay?pa=hyperlocal@fakebank&pn=HyperLocal&am=%s&cu=INR&tr=%s".formatted(amount.toPlainString(), reference);
-        log.info("[FAKE PAYMENT] hold {} for ₹{} auto-approved", reference, amount);
-        return new HoldResult(reference, PaymentStatus.HELD, intent, Instant.now().plus(properties.payment().holdTtl()));
+        boolean waitForWebhook = upiVpa != null && upiVpa.endsWith(PENDING_SUFFIX);
+        log.info("[FAKE PAYMENT] hold {} for ₹{} {}", reference, amount, waitForWebhook ? "pending until webhook" : "auto-approved");
+        return new HoldResult(reference, waitForWebhook ? PaymentStatus.HOLD_PENDING : PaymentStatus.HELD, intent,
+                Instant.now().plus(properties.payment().holdTtl()));
     }
 
     @Override
@@ -77,7 +83,7 @@ public class FakePaymentGateway implements PaymentGateway {
             case "HOLD_FAILED" -> WebhookType.HOLD_FAILED;
             default -> WebhookType.IGNORED;
         };
-        return new WebhookEvent(json.path("eventId").asString(), json.path("reference").asString(), type);
+        return new WebhookEvent(json.path("eventId").asString(), json.path("reference").asString(), type, null);
     }
 
     /** Hex HMAC-SHA256 of the body; public so tests and local tools can sign fake callbacks. */

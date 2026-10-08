@@ -57,7 +57,11 @@ public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing, Payment 
     }
 
     /** {@code webhookSecret} verifies gateway callbacks (HMAC-SHA256); {@code holdTtl} is how long a UPI hold lasts. */
-    public record Payment(String webhookSecret, Duration holdTtl) {
+    public record Payment(String webhookSecret, Duration holdTtl, Razorpay razorpay) {
+    }
+
+    /** Used only with the "razorpay" profile. */
+    public record Razorpay(String baseUrl, String keyId, String keySecret) {
     }
 
     /** First ops admin, created on startup when the email is set (ADMIN_EMAIL / ADMIN_PASSWORD / ADMIN_NAME). */

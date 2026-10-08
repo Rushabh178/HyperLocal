@@ -65,6 +65,10 @@ public class Payment {
     @Column(name = "gateway_reference", unique = true, length = 100)
     private String gatewayReference;
 
+    /** Some gateways (Razorpay) capture/refund by a payment id they only reveal in the webhook. */
+    @Column(name = "gateway_payment_id", length = 100)
+    private String gatewayPaymentId;
+
     @Column(name = "upi_intent_url", length = 500)
     private String upiIntentUrl;
 
