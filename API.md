@@ -100,15 +100,19 @@ Pass the selected address's pin as `lat`/`lng`. Everything is limited to approve
 | GET | `/search?lat&lng&q` | `{restaurants (≤10, name or cuisine), dishes (≤20), groceries (≤20)}` | ✅ |
 
 ### Unified cart: `/customer/cart`
-| Method | Path | Status |
-|---|---|---|
-| GET | `/` | 🚧 |
-| POST | `/items` `{itemType FOOD/GROCERY, itemId, restaurantId?, quantity}` | 🚧 |
-| PATCH | `/items/{cartItemId}` `{quantity}` | 🚧 |
-| DELETE | `/items/{cartItemId}` | 🚧 |
-| DELETE | `/` | 🚧 |
-| PUT | `/address` `{addressId}` | 🚧 |
-| GET | `/nudges` (grocery-only cart under ₹150 → suggested meals) | 🚧 |
+One persistent cart per customer: food from **one** restaurant plus any groceries. Prices are always read from the live catalogue.
+| Method | Path | Notes | Status |
+|---|---|---|---|
+| GET | `/` | `{restaurantId, foodItems, groceryItems, deliveryAddressId, bill, nudge}` (empty cart if none) | ✅ |
+| POST | `/items` `{itemType FOOD/GROCERY, itemId, restaurantId?, quantity}` | `restaurantId` required for FOOD; food from another restaurant **replaces** the food section; same item again adds to the quantity (max 20); `409 STORE_CLOSED` if the store is closed | ✅ |
+| PATCH | `/items/{cartItemId}` `{quantity}` | 0 removes the line | ✅ |
+| DELETE | `/items/{cartItemId}` | returns the cart | ✅ |
+| DELETE | `/` | 204 | ✅ |
+| PUT | `/address` `{addressId}` | must be yours, within 2 km of the restaurant and of an open Kirana if there are groceries (`400 ADDRESS_NOT_SERVICEABLE`) | ✅ |
+| GET | `/nudges` | same object as `cart.nudge`; `message:null` and no meals when it doesn't apply | ✅ |
+
+Bill (`app.ops.*`): `deliveryFee` ₹25, **waived** when the cart has food or groceries reach ₹150 · `convenienceFee` ₹10 flat · `taxes` 5% GST on food only · `discount` 0 for now.
+Nudge: a grocery-only cart under ₹150 gets `{groceryTotal, threshold, message, suggestedMeals}` — the 5 priciest available dishes from open restaurants near the cart's address (or the default address).
 
 ### Orders: `/customer/orders`
 | Method | Path | Status |

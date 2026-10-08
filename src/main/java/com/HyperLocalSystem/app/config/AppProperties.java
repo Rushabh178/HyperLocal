@@ -27,7 +27,13 @@ public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing) {
             BigDecimal groceryCartNudgeThreshold,
             BigDecimal batchInjectionBonus,
             /** Used for ETAs before a restaurant has accepted and set its own prep time. */
-            int defaultPrepMinutes
+            int defaultPrepMinutes,
+            /** Charged unless the cart has food or groceries reach groceryCartNudgeThreshold. */
+            BigDecimal deliveryFee,
+            /** One flat platform fee per order, whatever it contains. */
+            BigDecimal convenienceFee,
+            /** GST on restaurant food, e.g. 0.05. Groceries are priced tax-inclusive (MRP). */
+            BigDecimal foodTaxRate
     ) {
     }
 

@@ -121,6 +121,14 @@ public abstract class IntegrationTest {
         return session;
     }
 
+    /** Saves a delivery address at {@code location} (a {@link #point} JSON) and returns its id. */
+    protected String addAddress(String customerToken, String location) throws Exception {
+        String address = call(HttpMethod.POST, "/api/v1/customer/addresses", customerToken, """
+                {"label":"HOME","houseNumber":"12B","city":"Pune","state":"Maharashtra","pincode":"411001",
+                 "location":%s}""".formatted(location), 201);
+        return read(address, "$.id");
+    }
+
     /** Adds an available item to the merchant's menu/shelf and returns its id. */
     protected String createItem(String merchantToken, String name, String price, String category, String zone) throws Exception {
         String item = call(HttpMethod.POST, "/api/v1/merchant/items", merchantToken, """
