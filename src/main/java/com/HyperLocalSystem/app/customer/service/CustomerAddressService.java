@@ -1,7 +1,7 @@
 package com.HyperLocalSystem.app.customer.service;
 
+import com.HyperLocalSystem.app.catalog.service.CatalogService;
 import com.HyperLocalSystem.app.common.exception.ApiException;
-import com.HyperLocalSystem.app.common.exception.NotImplementedException;
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
 import com.HyperLocalSystem.app.common.geo.GeoUtils;
 import com.HyperLocalSystem.app.customer.dto.CustomerDtos.AddressRequest;
@@ -9,6 +9,8 @@ import com.HyperLocalSystem.app.customer.dto.CustomerDtos.AddressResponse;
 import com.HyperLocalSystem.app.customer.dto.CustomerDtos.ServiceabilityResponse;
 import com.HyperLocalSystem.app.customer.entity.CustomerAddress;
 import com.HyperLocalSystem.app.customer.repository.CustomerAddressRepository;
+import com.HyperLocalSystem.app.merchant.entity.MerchantType;
+import com.HyperLocalSystem.app.config.AppProperties;
 import com.HyperLocalSystem.app.security.PhoneNumbers;
 import com.HyperLocalSystem.app.spatial.SpatialIndexService;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +31,8 @@ public class CustomerAddressService {
 
     private final CustomerAddressRepository addresses;
     private final SpatialIndexService spatialIndex;
+    private final CatalogService catalogService;
+    private final AppProperties properties;
 
     @Transactional(readOnly = true)
     public List<AddressResponse> list(UUID customerId) {
@@ -95,13 +99,17 @@ public class CustomerAddressService {
         }
     }
 
-    /**
-     * Is this pin inside the 2 km operating radius of at least one restaurant / Kirana?
-     * TODO: query merchants with ST_DWithin(location::geography, :pin::geography, ops.serviceRadiusMeters)
-     *       once the merchants table exists.
-     */
+    /** Is this pin inside the 2 km operating radius of at least one approved restaurant or Kirana? */
+    @Transactional(readOnly = true)
     public ServiceabilityResponse checkServiceability(GeoPoint location) {
-        throw new NotImplementedException("Address serviceability check");
+        int radius = properties.ops().serviceRadiusMeters();
+        int restaurants = (int) catalogService.countNearby(MerchantType.RESTAURANT, location.lat(), location.lng());
+        int kiranas = (int) catalogService.countNearby(MerchantType.KIRANA, location.lat(), location.lng());
+        boolean serviceable = restaurants + kiranas > 0;
+        String message = serviceable
+                ? "We deliver here: %d restaurants and %d stores nearby".formatted(restaurants, kiranas)
+                : "We don't deliver to this location yet";
+        return new ServiceabilityResponse(serviceable, radius, restaurants, kiranas, message);
     }
 
     private void apply(CustomerAddress address, AddressRequest request) {
@@ -131,7 +139,7 @@ public class CustomerAddressService {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
-    static AddressResponse toResponse(CustomerAddress a) {
+    public static AddressResponse toResponse(CustomerAddress a) {
         String fullAddress = Stream.of(a.getHouseNumber(), a.getBuildingName(), a.getStreet(), a.getLandmark(),
                         a.getArea(), a.getCity(), a.getState() + " " + a.getPincode())
                 .filter(Objects::nonNull)

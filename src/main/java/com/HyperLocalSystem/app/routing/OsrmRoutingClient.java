@@ -2,6 +2,7 @@ package com.HyperLocalSystem.app.routing;
 
 import com.HyperLocalSystem.app.common.exception.NotImplementedException;
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -15,6 +16,7 @@ import java.util.List;
  * Note OSRM takes coordinates as lng,lat.
  */
 @Component
+@Profile("osrm")
 public class OsrmRoutingClient implements RoutingClient {
 
     @Override

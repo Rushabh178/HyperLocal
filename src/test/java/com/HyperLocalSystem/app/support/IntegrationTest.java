@@ -92,6 +92,13 @@ public abstract class IntegrationTest {
         return "{\"lat\":%s,\"lng\":%s}".formatted(lat, lng);
     }
 
+    /** The same offset as {@link #point} but as {@code lat=..&lng=..} query parameters. */
+    protected String latLng(double northMeters, double eastMeters) {
+        double lat = baseLat + northMeters / 111_320.0;
+        double lng = baseLng + eastMeters / (111_320.0 * Math.cos(Math.toRadians(baseLat)));
+        return "lat=%s&lng=%s".formatted(lat, lng);
+    }
+
     protected Session signUpCustomer() throws Exception {
         String phone = randomPhone();
         String signup = call(HttpMethod.POST, "/api/v1/customer/auth/signup", null, """

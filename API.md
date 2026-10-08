@@ -86,17 +86,18 @@ Required documents: `AADHAAR, PAN, PROFILE_PHOTO`, plus `DRIVING_LICENSE, VEHICL
 | PUT | `/{id}` | same body as POST | ✅ |
 | PUT | `/{id}/default` | | ✅ |
 | DELETE | `/{id}` | soft delete; the next address is promoted to default | ✅ |
-| POST | `/serviceability` | `{lat,lng}`: inside the 2 km radius? | 🚧 |
+| POST | `/serviceability` | `{lat,lng}` → `{serviceable, serviceRadiusMeters, nearbyRestaurants, nearbyKiranaStores, message}`; counts approved stores within 2 km | ✅ |
 
 Address body: `label` (HOME/WORK/OTHER), `customLabel?`, `recipientName?`, `recipientPhone?`, `houseNumber`, `buildingName?`, `street?`, `landmark?`, `area?`, `city`, `state`, `pincode`, `location {lat,lng}`, `deliveryInstructions?`, `makeDefault?`. The server stores a PostGIS point plus its H3 cell.
 
 ### Catalog: `/catalog` (public GET)
-| Method | Path | Status |
-|---|---|---|
-| GET | `/restaurants?lat&lng&cuisine&page&size` | 🚧 |
-| GET | `/restaurants/{id}/menu` | 🚧 |
-| GET | `/groceries?lat&lng&q&category&page&size` | 🚧 |
-| GET | `/search?lat&lng&q` | 🚧 |
+Pass the selected address's pin as `lat`/`lng`. Everything is limited to approved stores within 2 km (`app.ops.service-radius-meters`).
+| Method | Path | Notes | Status |
+|---|---|---|---|
+| GET | `/restaurants?lat&lng&cuisine&page&size` | open restaurants first, then nearest; closed ones have `open:false`; `etaMinutes` = default prep (15) + travel time; `rating` is null until rated | ✅ |
+| GET | `/restaurants/{id}/menu` | grouped by category; sold-out dishes have `available:false` | ✅ |
+| GET | `/groceries?lat&lng&q&category&page&size` | "virtual warehouse": products listed by **open** Kiranas within 2 km, one row per product (name + pack size) at the cheapest price; empty when no Kirana is open nearby | ✅ |
+| GET | `/search?lat&lng&q` | `{restaurants (≤10, name or cuisine), dishes (≤20), groceries (≤20)}` | ✅ |
 
 ### Unified cart: `/customer/cart`
 | Method | Path | Status |

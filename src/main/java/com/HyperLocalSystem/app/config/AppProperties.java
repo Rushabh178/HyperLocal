@@ -7,7 +7,7 @@ import java.time.Duration;
 
 /** Typed view of the {@code app.*} settings in application.properties. */
 @ConfigurationProperties(prefix = "app")
-public record AppProperties(Jwt jwt, Otp otp, Ops ops) {
+public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing) {
 
     public record Jwt(String secret, String issuer, Duration accessTokenTtl, Duration refreshTokenTtl) {
     }
@@ -25,7 +25,16 @@ public record AppProperties(Jwt jwt, Otp otp, Ops ops) {
             Duration kiranaClaimTimeout,
             int h3Resolution,
             BigDecimal groceryCartNudgeThreshold,
-            BigDecimal batchInjectionBonus
+            BigDecimal batchInjectionBonus,
+            /** Used for ETAs before a restaurant has accepted and set its own prep time. */
+            int defaultPrepMinutes
     ) {
+    }
+
+    /**
+     * Road routing. Without the "osrm" profile, ETAs use straight-line distance x {@code detourFactor}
+     * at {@code averageSpeedKmph}.
+     */
+    public record Routing(double detourFactor, double averageSpeedKmph, String osrmBaseUrl) {
     }
 }
