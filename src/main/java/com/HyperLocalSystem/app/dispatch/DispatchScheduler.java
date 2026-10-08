@@ -4,6 +4,7 @@ import com.HyperLocalSystem.app.dispatch.repository.BroadcastOfferRepository;
 import com.HyperLocalSystem.app.dispatch.repository.TaskOfferRepository;
 import com.HyperLocalSystem.app.order.repository.UnifiedOrderRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -17,7 +18,7 @@ import java.util.UUID;
  * <ol>
  *   <li>opens SCHEDULED broadcast rounds that are due and expands expired OPEN ones;</li>
  *   <li>expires rider offers nobody answered;</li>
- *   <li>offers waiting orders to the next free rider.</li>
+ *   <li>dispatches waiting orders (batching first for grocery-only ones, else the next free rider).</li>
  * </ol>
  * Due work is listed without locks, then each row is handled in its own short transaction behind a
  * {@code FOR UPDATE SKIP LOCKED} re-check, so instances never double-process a row and one failing
@@ -57,13 +58,17 @@ public class DispatchScheduler {
         inTransaction("expire rider offers", () -> taskOffers.expireDue(now));
         for (UUID orderId : orders.findIdsAwaitingRider(BATCH)) {
             inTransaction("dispatch order " + orderId,
-                    () -> orders.lockIfAwaitingRider(orderId).ifPresent(dispatch::offerNextRider));
+                    () -> orders.lockIfAwaitingRider(orderId).ifPresent(dispatch::dispatch));
         }
     }
 
     private void inTransaction(String what, Runnable work) {
         try {
             tx.executeWithoutResult(status -> work.run());
+        } catch (DataIntegrityViolationException e) {
+            // Expected race: an event listener on this or another instance did the same work first
+            // (e.g. the one-open-offer-per-order index rejected a duplicate offer).
+            log.debug("Dispatch tick: {} already handled elsewhere", what);
         } catch (RuntimeException e) {
             log.warn("Dispatch tick: {} failed: {}", what, e.getMessage());
         }

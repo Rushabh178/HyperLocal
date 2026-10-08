@@ -1,6 +1,9 @@
 package com.HyperLocalSystem.app.dispatch;
 
+import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.RouteInjectionNotice;
 import com.HyperLocalSystem.app.agent.entity.DeliveryAgent;
+import com.HyperLocalSystem.app.batching.CoLinearBatchingEngine;
+import com.HyperLocalSystem.app.batching.CoLinearBatchingEngine.RouteInjectedEvent;
 import com.HyperLocalSystem.app.agent.entity.DutyStatus;
 import com.HyperLocalSystem.app.agent.repository.DeliveryAgentRepository;
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
@@ -13,6 +16,7 @@ import com.HyperLocalSystem.app.dispatch.entity.RiderRoute;
 import com.HyperLocalSystem.app.dispatch.entity.RouteStop;
 import com.HyperLocalSystem.app.dispatch.entity.TaskOffer;
 import com.HyperLocalSystem.app.dispatch.repository.RiderRouteRepository;
+import com.HyperLocalSystem.app.dispatch.repository.RouteInjectionRepository;
 import com.HyperLocalSystem.app.dispatch.repository.RouteStopRepository;
 import com.HyperLocalSystem.app.dispatch.repository.TaskOfferRepository;
 import com.HyperLocalSystem.app.merchant.repository.MerchantRepository;
@@ -59,6 +63,8 @@ public class DispatchOrchestrator {
     private final RiderRouteRepository routes;
     private final RouteStopRepository stops;
     private final KiranaBroadcastService broadcastService;
+    private final CoLinearBatchingEngine batchingEngine;
+    private final RouteInjectionRepository injections;
     private final RoutePlanner routePlanner;
     private final SpatialIndexService spatialIndex;
     private final RoutingClient routingClient;
@@ -90,7 +96,7 @@ public class DispatchOrchestrator {
         }
     }
 
-    /** A Kirana has the groceries: add the pickup to the rider's route, or (grocery-only) find a rider. */
+    /** A Kirana has the groceries: add the pickup to the rider's route, or (grocery-only) dispatch it. */
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -99,7 +105,7 @@ public class DispatchOrchestrator {
         if (order.getDeliveryAgentId() != null) {
             insertKiranaStop(order);
         } else if (!order.hasFood()) {
-            offerNextRider(order);
+            dispatch(order);
         }
     }
 
@@ -131,6 +137,19 @@ public class DispatchOrchestrator {
         orders.findById(event.orderId()).ifPresent(this::offerNextRider);
     }
 
+    /** The "+1 stop" haptic flash with the rider's updated route. */
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+    public void onRouteInjected(RouteInjectedEvent event) {
+        injections.findById(event.injectionId()).ifPresent(injection -> routes.findById(injection.getRouteId()).ifPresent(route -> {
+            var notice = new RouteInjectionNotice(injection.getId(),
+                    "Route Optimized: +1 Stop added nearby (+₹" + injection.getBonus().stripTrailingZeros().toPlainString() + " earned)",
+                    injection.getBonus(), routePlanner.toResponse(route, stops.findByRouteIdOrderBySequence(route.getId())));
+            realtime.sendRouteInjection(event.agentId(), notice);
+        }));
+    }
+
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
@@ -140,6 +159,18 @@ public class DispatchOrchestrator {
     }
 
     // ----------------------------------------------------------------- dispatch
+
+    /**
+     * Blueprint step 3 for a solo grocery order: first try to slip it into an active rider's route
+     * (co-linear batching); only if nobody qualifies, offer it to the nearest free rider.
+     */
+    @Transactional
+    public void dispatch(UnifiedOrder order) {
+        if (!order.hasFood() && batchingEngine.tryInject(order).isPresent()) {
+            return;
+        }
+        offerNextRider(order);
+    }
 
     /**
      * Offers the order to the nearest free rider around its first pickup who hasn't seen it yet.

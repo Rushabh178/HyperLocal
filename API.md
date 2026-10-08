@@ -260,7 +260,7 @@ There is no admin sign-up. The first admin is created on startup from `ADMIN_EMA
 - Endpoint: `ws://localhost:8080/ws`. The CONNECT frame must carry the header `Authorization: Bearer <accessToken>`.
 - Rider → server: `SEND /app/agent/location` with the same body as `POST /agent/me/location` ✅
 - Server → customer: `/user/queue/tracking` gets `{orderId, status, agentLocation, etaMinutes, updatedAt}` on every order status change and every location update of the rider carrying the order ✅
-- Server → rider: `/user/queue/route-updates` gets new offers ✅ and the "+1 stop" injection flash (Phase 10); errors on `/user/queue/errors`
+- Server → rider: `/user/queue/route-updates` gets new offers and the "+1 stop" injection flash `{injectionId, message, bonusAmount, updatedRoute}` ✅; errors on `/user/queue/errors`
 - Only `/user/...` subscriptions are allowed.
 
 ## Internal engines (no HTTP endpoints)
@@ -269,8 +269,8 @@ There is no admin sign-up. The first admin is created on startup from `ADMIN_EMA
 | `dispatch/DispatchOrchestrator` | reacts to order events after commit (async): starts the broadcast (combined orders wait `kirana-broadcast-combined-delay`, 2 min), offers food orders to the nearest rider at once, grocery-only orders once claimed; inserts late Kirana stops; postpones unstarted broadcasts on kitchen delays; cleans up on cancel | ✅ |
 | `dispatch/KiranaBroadcastService` | 5 nearest open Kiranas within 500 m, 60 s to claim, then the next ring (1 km); after the last round the groceries are `UNFULFILLED` (grocery-only orders are cancelled, combined orders refund the groceries to the wallet) | ✅ |
 | `dispatch/DispatchScheduler` | poller on every instance (`app.dispatch.poll-interval-ms`): opens/expands due broadcast rounds, expires offers, retries orders waiting for a rider; each row in its own transaction with `FOR UPDATE SKIP LOCKED` | ✅ |
-| `batching/CoLinearBatchingEngine` | 500 m corridor, vector intersection, Δt ≤ 4 min | 🚧 |
-| `routing/RoutingClient` | haversine × 1.3 at 20 km/h by default; OSRM behind the `osrm` profile | ✅ / 🚧 |
+| `batching/CoLinearBatchingEngine` | for a claimed grocery-only order: ACTIVE riders near the Kirana (H3), whose remaining route passes within 500 m of both the Kirana and the customer; every insertion that keeps existing stops in order is simulated and the cheapest one adding ≤ 4 min wins. The order becomes `BATCHED`, the rider earns ₹15 and gets the "+1 stop" push. Otherwise normal dispatch. The maths is in the pure `CoLinearBatchingAlgorithm` | ✅ |
+| `routing/RoutingClient` | `HaversineRoutingClient` (straight line × 1.3 at 20 km/h) by default; `OsrmRoutingClient` (`/route` + `/table`) with the `osrm` profile and `OSRM_BASE_URL` | ✅ |
 | `spatial/SpatialIndexService` | H3 cells (resolution 9) and the disk covering a radius | ✅ |
 
 The blueprint constants (2 km radius, 500 m corridor, 4 min, 60 s, ₹150, ₹15) live under `app.ops.*` in `application.properties`.
