@@ -150,13 +150,19 @@ Address body: `label` (HOME/WORK/OTHER), `customLabel?`, `recipientName?`, `reci
 ### Delivery range and fee
 Distances are measured from the customer's **selected delivery address** to the store (`app.delivery.*`):
 - **Visibility** uses the straight line (H3 cells first, then PostGIS): restaurants within **6 km** (`restaurant-radius-km`), Kiranas within **2 km** (`kirana-radius-km`). Groceries (catalogue, broadcast targets) always come from Kiranas within 2 km of the customer.
-- **The fee** uses the **road distance** (`RoutingClient`; by default straight line × 1.3) of the order's farthest pickup, which is the restaurant (Kiranas are always inside the free zone). It is shown as `distanceKm` (one decimal) next to `deliveryFee`.
+- **The fee distance** is that of the order's farthest pickup, which is the restaurant (Kiranas are always inside the free zone), measured on `app.delivery.fee-distance-basis`:
+  - `STRAIGHT_LINE` (default): the same straight line as visibility.
+  - `ROAD`: the road distance from `RoutingClient` (with the default routing, straight line × 1.3; with OSRM, real roads).
 
-| Road distance | Delivery fee |
+  That one number (km, one decimal) is shown as `distanceKm` on cards, the menu and the cart, decides whether the order is inside the free zone, and picks the slab. Rider distance pay is always by road (see the partner app).
+
+| Fee distance | Delivery fee |
 |---|---|
 | up to 2 km (`free-delivery-km`) | free; but a grocery-only cart under ₹150 pays ₹25 unless it adds a meal (the meal nudge) |
 | 2–3 km · 3–4 km · 4–5 km · 5–6 km (`fee-slabs`) | ₹15 · ₹25 · ₹35 · ₹45, whatever the cart holds (no waiver) |
-| over 6 km by road (store still within 6 km straight line) | ₹45, the last slab (`TODO(edge-case)`) |
+| over 6 km (`ROAD` basis only: a store within 6 km in a straight line can be farther by road) | ₹45, the last slab (`TODO(edge-case)`) |
+
+Example, restaurant 4 km away in a straight line: `STRAIGHT_LINE` → `distanceKm: 4.0`, `deliveryFee: 25.00`; `ROAD` with the default routing → `distanceKm: 5.2`, `deliveryFee: 45.00`. A restaurant 1.7 km away is free on `STRAIGHT_LINE` but 2.2 km and ₹15 on `ROAD`.
 
 So the restaurant cards and the menu can say "Free delivery" (`deliveryFee: 0.00`) or "₹25 delivery". The cart and checkout recompute the fee for the chosen address; checkout stores the distance with the order.
 
@@ -164,22 +170,22 @@ So the restaurant cards and the menu can say "Free delivery" (`deliveryFee: 0.00
 Pass the selected address's pin as `lat`/`lng`. Restaurants are limited to approved stores within 6 km, groceries to Kiranas within 2 km (see above).
 | Method | Path | Notes | Status |
 |---|---|---|---|
-| GET | `/restaurants?lat&lng&cuisine&page&size` | open restaurants first, then nearest; closed ones have `open:false`; `etaMinutes` = default prep (15) + travel time; `rating` is null until rated; `distanceMeters` (straight line), `distanceKm` (road) and `deliveryFee` (example below) | ✅ |
-| GET | `/restaurants/{id}/menu?lat&lng` | grouped by category; sold-out dishes have `available:false`. Header: `isOpen` (same as `open`), `rating` (null until rated), `ratingCount`, and with the customer's pin `distanceKm` (road), `etaMinutes` and `deliveryFee` (all null without `lat`/`lng`). Example below | ✅ |
+| GET | `/restaurants?lat&lng&cuisine&page&size` | open restaurants first, then nearest; closed ones have `open:false`; `etaMinutes` = default prep (15) + travel time; `rating` is null until rated; `distanceMeters` (straight line, exact), `distanceKm` (fee distance) and `deliveryFee` (example below) | ✅ |
+| GET | `/restaurants/{id}/menu?lat&lng` | grouped by category; sold-out dishes have `available:false`. Header: `isOpen` (same as `open`), `rating` (null until rated), `ratingCount`, and with the customer's pin `distanceKm` (fee distance), `etaMinutes` and `deliveryFee` (all null without `lat`/`lng`). Example below | ✅ |
 | GET | `/groceries/categories?lat&lng&page&size` | categories of that same catalogue with distinct product counts, e.g. `{"items":[{"category":"Bakery","itemCount":1},{"category":"Dairy","itemCount":2}],"page":0,"size":50,"totalItems":2}` | ✅ |
 | GET | `/groceries?lat&lng&q&category&page&size` | "virtual warehouse": products listed by **open** Kiranas within 2 km, one row per product (name + pack size) at the cheapest price; empty when no Kirana is open nearby | ✅ |
 | GET | `/search?lat&lng&q` | `{restaurants (≤10, name or cuisine), dishes (≤20), groceries (≤20)}`; each dish carries what's needed to add it: `{itemId, restaurantId, restaurantName, name, description, price, veg, available, imageUrl}` (`id` = `itemId`) | ✅ |
 
 Restaurant card:
 ```json
-{ "id": "0c5e…", "name": "Spice Hub", "cuisines": ["North Indian", "Biryani"], "rating": 4.3, "distanceMeters": 2400,
-  "etaMinutes": 24, "open": true, "imageUrl": null, "distanceKm": 3.1, "deliveryFee": 25.00 }
+{ "id": "0c5e…", "name": "Spice Hub", "cuisines": ["North Indian", "Biryani"], "rating": 4.3, "distanceMeters": 3120,
+  "etaMinutes": 27, "open": true, "imageUrl": null, "distanceKm": 3.1, "deliveryFee": 25.00 }
 ```
 Menu:
 ```json
 GET /api/v1/catalog/restaurants/0c5e…/menu?lat=18.5204&lng=73.8567
 { "restaurantId": "0c5e…", "restaurantName": "Spice Hub", "open": true, "isOpen": true,
-  "distanceKm": 3.1, "etaMinutes": 24, "rating": 4.3, "ratingCount": 18, "deliveryFee": 25.00,
+  "distanceKm": 3.1, "etaMinutes": 27, "rating": 4.3, "ratingCount": 18, "deliveryFee": 25.00,
   "categories": [ { "name": "Biryani", "items": [ { "id": "9b3c…", "name": "Veg Biryani", "description": "…", "price": 180.00,
                                                     "veg": true, "available": true, "imageUrl": null } ] } ] }
 ```
@@ -194,7 +200,7 @@ Dish search result:
 One persistent cart per customer: food from **one** restaurant plus any groceries. Prices are always read from the live catalogue.
 | Method | Path | Notes | Status |
 |---|---|---|---|
-| GET | `/` | `{restaurantId, foodItems, groceryItems, deliveryAddressId, bill, nudge, deliveryDistanceKm, freeDeliveryKm}` (empty cart if none). The bill is priced for the cart's address, else the default address; `deliveryDistanceKm` is the road km the fee used (null with no food or no address) | ✅ |
+| GET | `/` | `{restaurantId, foodItems, groceryItems, deliveryAddressId, bill, nudge, deliveryDistanceKm, freeDeliveryKm}` (empty cart if none). The bill is priced for the cart's address, else the default address; `deliveryDistanceKm` is the fee distance the fee used (null with no food or no address) | ✅ |
 | POST | `/items` `{itemType FOOD/GROCERY, itemId, restaurantId?, quantity}` | `restaurantId` required for FOOD; food from another restaurant **replaces** the food section; same item again adds to the quantity (max 20); `409 STORE_CLOSED` if the store is closed | ✅ |
 | PATCH | `/items/{cartItemId}` `{quantity}` | 0 removes the line | ✅ |
 | DELETE | `/items/{cartItemId}` | returns the cart | ✅ |
@@ -202,7 +208,7 @@ One persistent cart per customer: food from **one** restaurant plus any grocerie
 | PUT | `/address` `{addressId}` | must be yours, within 6 km of the restaurant and 2 km of an open Kirana if there are groceries (`400 ADDRESS_NOT_SERVICEABLE`; the message says which part can't come, e.g. "Food from Spice Hub can't be delivered to this address: it's more than 6 km away. Your groceries can." or "Groceries can't be delivered to this address: no grocery store is open within 2 km."). Returns the cart repriced for that address | ✅ |
 | GET | `/nudges` | same object as `cart.nudge`; `message:null` and no meals when it doesn't apply | ✅ |
 
-Bill: `deliveryFee` by distance (see "Delivery range and fee": free up to 2 km by road, where a grocery-only cart under ₹150 pays ₹25; slabs beyond) · `convenienceFee` ₹10 flat · `taxes` 5% GST on food only · `discount` 0 for now.
+Bill: `deliveryFee` by distance (see "Delivery range and fee": free up to 2 km, where a grocery-only cart under ₹150 pays ₹25; slabs beyond) · `convenienceFee` ₹10 flat · `taxes` 5% GST on food only · `discount` 0 for now.
 Nudge: a grocery-only cart under ₹150 gets `{groceryTotal, threshold, message, suggestedMeals}` — the 5 priciest available dishes from open restaurants **within 2 km** (`meal-nudge-radius-km`) of the cart's address (or the default address), so adding one keeps delivery free. Each meal carries what's needed to add it:
 ```json
 "nudge": { "groceryTotal": 30.00, "threshold": 150.00, "message": "Add a meal from a restaurant nearby and get free delivery",

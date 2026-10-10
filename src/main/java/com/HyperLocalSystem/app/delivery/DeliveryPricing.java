@@ -1,7 +1,9 @@
 package com.HyperLocalSystem.app.delivery;
 
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
+import com.HyperLocalSystem.app.common.geo.GeoUtils;
 import com.HyperLocalSystem.app.config.AppProperties;
+import com.HyperLocalSystem.app.config.AppProperties.Delivery.FeeDistanceBasis;
 import com.HyperLocalSystem.app.merchant.entity.MerchantType;
 import com.HyperLocalSystem.app.routing.RoutingClient;
 import org.springframework.stereotype.Component;
@@ -13,12 +15,14 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Delivery range and distance pricing ({@code app.delivery.*}). Two different distances, on purpose:
+ * Delivery range and distance pricing ({@code app.delivery.*}), all measured from the delivery address
+ * to the store:
  * <ul>
- *   <li><b>Visibility</b> (which stores a customer can see / order from) uses the straight line from the
- *       delivery address to the store: {@link #radiusMeters} (restaurants 6 km, Kiranas 2 km).</li>
- *   <li><b>The fee</b> uses the road distance from the store to the delivery address ({@link #roadKm}, via
- *       {@link RoutingClient}): free up to {@code free-delivery-km}, then the matching slab.</li>
+ *   <li><b>Visibility</b> (which stores a customer can see / order from) is always the straight line:
+ *       {@link #radiusMeters} (restaurants 6 km, Kiranas 2 km).</li>
+ *   <li><b>The fee distance</b> ({@link #feeKm}) follows {@code fee-distance-basis}: the straight line
+ *       (default) or the road distance from {@link RoutingClient}. The same number is shown as
+ *       {@code distanceKm}, decides the free zone ({@code free-delivery-km}) and picks the slab.</li>
  * </ul>
  */
 @Component
@@ -30,11 +34,13 @@ public class DeliveryPricing {
 
     private final AppProperties.Delivery delivery;
     private final RoutingClient routingClient;
+    private final FeeDistanceBasis basis;
     private final List<Slab> slabs;
 
     public DeliveryPricing(AppProperties properties, RoutingClient routingClient) {
         this.delivery = properties.delivery();
         this.routingClient = routingClient;
+        this.basis = delivery.feeDistanceBasis() == null ? FeeDistanceBasis.STRAIGHT_LINE : delivery.feeDistanceBasis();
         this.slabs = parse(delivery.feeSlabs());
     }
 
@@ -53,6 +59,10 @@ public class DeliveryPricing {
                 .toList();
     }
 
+    public FeeDistanceBasis basis() {
+        return basis;
+    }
+
     /** How far (straight line) a store of this type may be from the delivery address to be shown and ordered from. */
     public int radiusMeters(MerchantType type) {
         return meters(type == MerchantType.KIRANA ? delivery.kiranaRadiusKm() : delivery.restaurantRadiusKm());
@@ -67,29 +77,43 @@ public class DeliveryPricing {
         return delivery.freeDeliveryKm();
     }
 
-    /** Road distance from the store to the customer in km, one decimal: the number shown and the one the fee uses. */
-    public double roadKm(GeoPoint store, GeoPoint customer) {
-        return roadKm(routingClient.route(List.of(store, customer)).distanceMeters());
+    /** The fee distance from the store to the customer in km, one decimal: the number shown and the one the fee uses. */
+    public double feeKm(GeoPoint store, GeoPoint customer) {
+        return feeKm(List.of(store), customer)[0];
     }
 
-    public static double roadKm(int meters) {
+    /** {@link #feeKm(GeoPoint, GeoPoint)} for many stores at once (one routing matrix call on the road basis). */
+    public double[] feeKm(List<GeoPoint> stores, GeoPoint customer) {
+        double[] km = new double[stores.size()];
+        int[][] road = basis == FeeDistanceBasis.ROAD && !stores.isEmpty()
+                ? routingClient.distanceMatrix(stores, List.of(customer)) : null;
+        for (int i = 0; i < stores.size(); i++) {
+            km[i] = km(road != null ? road[i][0] : (int) Math.round(GeoUtils.haversineMeters(stores.get(i), customer)));
+        }
+        return km;
+    }
+
+    /** Meters as km with one decimal, e.g. 1.4. */
+    public static double km(int meters) {
         return BigDecimal.valueOf(meters / 1000.0).setScale(1, RoundingMode.HALF_UP).doubleValue();
     }
 
-    public boolean insideFreeZone(double roadKm) {
-        return roadKm <= delivery.freeDeliveryKm();
+    public boolean insideFreeZone(double feeKm) {
+        return feeKm <= delivery.freeDeliveryKm();
     }
 
     /**
-     * The slab fee for an order whose farthest pickup is {@code roadKm} away; zero inside the free zone.
-     * TODO(edge-case): stores are visible by straight line (6 km) but slabs end at 6 km by road, so a store
-     * farther than the last slab by road pays the last slab's fee.
+     * The slab fee for an order whose farthest pickup is {@code feeKm} away; zero inside the free zone.
+     * Beyond the last slab the last slab's fee applies. On the straight-line basis that can't happen (stores
+     * are only visible within the last slab's distance); on the road basis a store within 6 km in a straight
+     * line can be farther by road.
+     * TODO(edge-case): road basis only: decide whether stores beyond the last slab by road should be hidden or cost more.
      */
-    public BigDecimal slabFee(double roadKm) {
-        if (insideFreeZone(roadKm) || slabs.isEmpty()) {
+    public BigDecimal slabFee(double feeKm) {
+        if (insideFreeZone(feeKm) || slabs.isEmpty()) {
             return BigDecimal.ZERO.setScale(2, RoundingMode.UNNECESSARY);
         }
-        return slabs.stream().filter(slab -> roadKm <= slab.toKm()).findFirst().orElse(slabs.getLast()).fee();
+        return slabs.stream().filter(slab -> feeKm <= slab.toKm()).findFirst().orElse(slabs.getLast()).fee();
     }
 
     private static int meters(double km) {

@@ -80,8 +80,9 @@ public final class CartDtos {
     }
 
     /**
-     * {@code deliveryDistanceKm}: road km from the restaurant to the delivery address (the cart's address, else the
-     * default one) that the delivery fee is based on; null when there is no food or no address yet.
+     * {@code deliveryDistanceKm}: km from the restaurant to the delivery address (the cart's address, else the
+     * default one) on {@code fee-distance-basis}, what the delivery fee is based on; null when there is no food or no
+     * address yet.
      * {@code freeDeliveryKm}: delivery is free up to this distance.
      */
     public record CartResponse(

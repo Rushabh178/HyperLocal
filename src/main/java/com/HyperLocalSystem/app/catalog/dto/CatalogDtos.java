@@ -22,7 +22,7 @@ public final class CatalogDtos {
             int etaMinutes,
             boolean open,
             String imageUrl,
-            /** Road km from the restaurant to the pin, one decimal: what the delivery fee is based on. */
+            /** Km from the restaurant to the pin on {@code fee-distance-basis}, one decimal: what the delivery fee is based on. */
             double distanceKm,
             /** 0.00 = "Free delivery"; otherwise the distance slab. */
             BigDecimal deliveryFee) {
@@ -43,7 +43,7 @@ public final class CatalogDtos {
 
     /**
      * A restaurant's menu. {@code isOpen} repeats {@code open} under the name the apps use. The
-     * distance (road km), ETA and delivery fee need the customer's pin ({@code ?lat&lng}) and are null
+     * distance (fee distance, km), ETA and delivery fee need the customer's pin ({@code ?lat&lng}) and are null
      * without it; {@code rating} is null until rated.
      */
     public record MenuResponse(

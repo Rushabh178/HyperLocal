@@ -51,10 +51,14 @@ public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing, Payment 
 
     /**
      * Delivery range and pricing, see {@code delivery.DeliveryPricing}. Radii are straight-line km from the
-     * delivery address; {@code freeDeliveryKm} and {@code feeSlabs} ("2-3:15,3-4:25") are road km.
+     * delivery address; {@code freeDeliveryKm} and {@code feeSlabs} ("2-3:15,3-4:25") are km on
+     * {@code feeDistanceBasis} (STRAIGHT_LINE when not set).
      */
     public record Delivery(double restaurantRadiusKm, double kiranaRadiusKm, double freeDeliveryKm, String feeSlabs,
-                           double mealNudgeRadiusKm) {
+                           double mealNudgeRadiusKm, FeeDistanceBasis feeDistanceBasis) {
+
+        /** How the fee distance is measured: as the crow flies, or by road ({@code RoutingClient}). */
+        public enum FeeDistanceBasis { STRAIGHT_LINE, ROAD }
     }
 
     /** Rider distance pay: {@code perKmRate} for every km of an order's route beyond {@code distancePayAfterKm}. */

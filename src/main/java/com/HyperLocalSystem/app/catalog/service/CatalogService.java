@@ -61,7 +61,7 @@ public class CatalogService {
 
     /**
      * Restaurants within 6 km, open ones first, then nearest. Closed ones are listed with {@code open=false}.
-     * Each card has the road distance and the delivery fee ("Free delivery" / "₹25 delivery").
+     * Each card has the fee distance and the delivery fee ("Free delivery" / "₹25 delivery").
      */
     @Transactional(readOnly = true)
     public PageResponse<RestaurantSummary> nearbyRestaurants(double lat, double lng, String cuisine, int page, int size) {
@@ -96,9 +96,9 @@ public class CatalogService {
         if (lat != null && lng != null) {
             GeoPoint store = GeoUtils.fromPoint(restaurant.getLocation());
             GeoPoint customer = new GeoPoint(lat, lng);
-            RoutingClient.Route route = routingClient.route(List.of(store, customer));
-            distanceKm = DeliveryPricing.roadKm(route.distanceMeters());
-            etaMinutes = properties.ops().defaultPrepMinutes() + (int) Math.ceil(route.duration().toSeconds() / 60.0);
+            distanceKm = pricing.feeKm(store, customer);
+            long seconds = routingClient.durationMatrix(List.of(store), List.of(customer))[0][0];
+            etaMinutes = properties.ops().defaultPrepMinutes() + (int) Math.ceil(seconds / 60.0);
             deliveryFee = pricing.slabFee(distanceKm);
         }
         return new MenuResponse(restaurant.getId(), restaurant.getStoreName(), restaurant.isOpen(), restaurant.isOpen(),
@@ -189,15 +189,14 @@ public class CatalogService {
         }
         List<GeoPoint> stores = rows.stream().map(row -> new GeoPoint(row.getLat(), row.getLng())).toList();
         long[][] seconds = routingClient.durationMatrix(stores, List.of(customer));
-        int[][] meters = routingClient.distanceMatrix(stores, List.of(customer));
+        double[] feeKm = pricing.feeKm(stores, customer);
         int prepMinutes = properties.ops().defaultPrepMinutes();
         return IntStream.range(0, rows.size()).mapToObj(i -> {
             NearbyMerchant row = rows.get(i);
             int travelMinutes = (int) Math.ceil(seconds[i][0] / 60.0);
-            double roadKm = DeliveryPricing.roadKm(meters[i][0]);
             return new RestaurantSummary(row.getId(), row.getName(), cuisines(row.getCuisines()), rating(row),
                     (int) Math.round(row.getDistanceMeters()), prepMinutes + travelMinutes, row.getOpen(), row.getImageUrl(),
-                    roadKm, pricing.slabFee(roadKm));
+                    feeKm[i], pricing.slabFee(feeKm[i]));
         }).toList();
     }
 

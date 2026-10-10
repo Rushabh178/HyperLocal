@@ -60,8 +60,8 @@ public class CartService {
     private final AppProperties properties;
 
     /** A priced snapshot of the cart, also used by checkout. */
-    /** {@code roadKm}: the distance the delivery fee was priced on, null when unknown. */
-    public record PricedCart(Cart cart, List<PricedLine> food, List<PricedLine> groceries, BillSummary bill, Double roadKm) {
+    /** {@code feeKm}: the distance the delivery fee was priced on, null when unknown. */
+    public record PricedCart(Cart cart, List<PricedLine> food, List<PricedLine> groceries, BillSummary bill, Double feeKm) {
 
         public boolean isEmpty() {
             return food.isEmpty() && groceries.isEmpty();
@@ -233,7 +233,7 @@ public class CartService {
     }
 
     /**
-     * Prices the cart. The delivery fee depends on the road distance of the farthest pickup: the restaurant.
+     * Prices the cart. The delivery fee depends on the fee distance of the farthest pickup: the restaurant.
      * Groceries come from a Kirana within {@code kirana-radius-km}, which is inside the free-delivery zone.
      * TODO(edge-case): if kirana-radius-km is ever raised above free-delivery-km, price the grocery pickup too.
      */
@@ -248,13 +248,13 @@ public class CartService {
                 .toList();
         List<PricedLine> food = priced.stream().filter(p -> p.line().getType() == ItemType.FOOD).toList();
         List<PricedLine> groceries = priced.stream().filter(p -> p.line().getType() == ItemType.GROCERY).toList();
-        Double roadKm = null;
+        Double feeKm = null;
         if (!food.isEmpty() && cart.getRestaurantId() != null && pin != null) {
-            roadKm = merchants.findById(cart.getRestaurantId())
-                    .map(restaurant -> pricing.roadKm(GeoUtils.fromPoint(restaurant.getLocation()), GeoUtils.fromPoint(pin.getLocation())))
+            feeKm = merchants.findById(cart.getRestaurantId())
+                    .map(restaurant -> pricing.feeKm(GeoUtils.fromPoint(restaurant.getLocation()), GeoUtils.fromPoint(pin.getLocation())))
                     .orElse(null);
         }
-        return new PricedCart(cart, food, groceries, billCalculator.bill(sum(food), sum(groceries), roadKm), roadKm);
+        return new PricedCart(cart, food, groceries, billCalculator.bill(sum(food), sum(groceries), feeKm), feeKm);
     }
 
     private static BigDecimal sum(List<PricedLine> lines) {
@@ -303,7 +303,7 @@ public class CartService {
         }
         return new CartResponse(priced.cart().getRestaurantId(), priced.food().stream().map(CartService::toLine).toList(),
                 priced.groceries().stream().map(CartService::toLine).toList(), priced.cart().getDeliveryAddressId(),
-                priced.bill(), buildNudge(customerId, priced), priced.roadKm(), pricing.freeDeliveryKm());
+                priced.bill(), buildNudge(customerId, priced), priced.feeKm(), pricing.freeDeliveryKm());
     }
 
     private static CartItemResponse toLine(PricedLine p) {

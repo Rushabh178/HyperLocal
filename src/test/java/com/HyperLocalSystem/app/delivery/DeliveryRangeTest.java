@@ -11,30 +11,31 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
 /**
- * Delivery range and pricing: restaurants visible to 6 km with a distance fee (road km = straight line x 1.3
- * with the default routing), Kiranas only within 2 km of the customer, the meal nudge only within 2 km, and
- * the rider paid per km beyond 2 km.
+ * Delivery range and pricing on the default straight-line fee basis: restaurants visible to 6 km with a
+ * distance fee, Kiranas only within 2 km of the customer, the meal nudge only within 2 km, and the rider
+ * paid per km of road (straight line x 1.3 with the default routing) beyond 2 km. The road fee basis is in
+ * {@link RoadFeeBasisTest}.
  */
 class DeliveryRangeTest extends IntegrationTest {
 
     @Test
     void restaurantAt4KmIsVisibleWithAFeeAndTheRiderIsPaidForTheDistance() throws Exception {
         signUpMerchant("RESTAURANT", "Near Dhaba", point(0, 1000), true);
+        signUpMerchant("RESTAURANT", "Edge Cafe", point(0, 1700), true);
         Session far = signUpMerchant("RESTAURANT", "Far Biryani", point(0, 4000), true);
         Session tooFar = signUpMerchant("RESTAURANT", "Other Town", point(0, -7000), true);
         Session rider = onlineRider(point(0, 4050));
         String biryani = createItem(far.token(), "Veg Biryani", "180.00", "Mains", "HOT");
         String thali = createItem(tooFar.token(), "Thali", "150.00", "Mains", "HOT");
 
-        // Cards: 1 km → free; 4 km (5.2 km by road) → the 5-6 km slab, ₹45; 7 km → not listed.
+        // Cards: 1 km and 1.7 km → free; 4 km → the 3-4 km slab, ₹25; 7 km → not listed.
         String cards = get("/api/v1/catalog/restaurants?" + latLng(0, 0), null);
-        assertThat((List<String>) read(cards, "$.items[*].name")).containsExactly("Near Dhaba", "Far Biryani");
-        assertThat((Double) read(cards, "$.items[0].deliveryFee")).isEqualTo(0.0);
-        assertThat((Double) read(cards, "$.items[1].distanceKm")).isEqualTo(5.2);
-        assertThat((Double) read(cards, "$.items[1].deliveryFee")).isEqualTo(45.0);
+        assertThat((List<String>) read(cards, "$.items[*].name")).containsExactly("Near Dhaba", "Edge Cafe", "Far Biryani");
+        assertThat((List<Double>) read(cards, "$.items[*].distanceKm")).containsExactly(1.0, 1.7, 4.0);
+        assertThat((List<Double>) read(cards, "$.items[*].deliveryFee")).containsExactly(0.0, 0.0, 25.0);
         String menu = get("/api/v1/catalog/restaurants/" + far.id() + "/menu?" + latLng(0, 0), null);
-        assertThat((Double) read(menu, "$.deliveryFee")).isEqualTo(45.0);
-        assertThat((Double) read(menu, "$.distanceKm")).isEqualTo(5.2);
+        assertThat((Double) read(menu, "$.deliveryFee")).isEqualTo(25.0);
+        assertThat((Double) read(menu, "$.distanceKm")).isEqualTo(4.0);
 
         // Address check names the part that can't come.
         Session customer = signUpCustomer();
@@ -48,13 +49,13 @@ class DeliveryRangeTest extends IntegrationTest {
         post("/api/v1/customer/cart/items", customer.token(),
                 "{\"itemType\":\"FOOD\",\"itemId\":\"%s\",\"restaurantId\":\"%s\",\"quantity\":1}".formatted(biryani, far.id()));
         String cart = put("/api/v1/customer/cart/address", customer.token(), "{\"addressId\":\"%s\"}".formatted(home));
-        assertThat((Double) read(cart, "$.bill.deliveryFee")).isEqualTo(45.0);
-        assertThat((Double) read(cart, "$.deliveryDistanceKm")).isEqualTo(5.2);
+        assertThat((Double) read(cart, "$.bill.deliveryFee")).isEqualTo(25.0);
+        assertThat((Double) read(cart, "$.deliveryDistanceKm")).isEqualTo(4.0);
         String orderId = read(call(HttpMethod.POST, "/api/v1/customer/orders/checkout", customer.token(),
                 "{\"addressId\":\"%s\",\"paymentMethod\":\"UPI\"}".formatted(home), 201), "$.orderId");
-        assertThat((Double) read(get("/api/v1/customer/orders/" + orderId, customer.token()), "$.bill.deliveryFee")).isEqualTo(45.0);
+        assertThat((Double) read(get("/api/v1/customer/orders/" + orderId, customer.token()), "$.bill.deliveryFee")).isEqualTo(25.0);
 
-        // Rider: base ₹30 + ₹5/km for the 3.2 km beyond 2 km.
+        // Rider pay is always by road: base ₹30 + ₹5/km for the 3.2 km (5.2 - 2) beyond 2 km.
         String offer = messages.waitFor(rider.id(), "/queue/route-updates", "OFFER", "$.data.orderIds[0]", orderId);
         assertThat((Double) read(offer, "$.data.estimatedEarnings")).isCloseTo(46.0, within(0.05));
         String route = post("/api/v1/agent/offers/" + read(offer, "$.data.offerId") + "/accept", rider.token(), null);

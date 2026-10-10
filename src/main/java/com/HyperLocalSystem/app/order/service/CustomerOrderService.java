@@ -117,7 +117,7 @@ public class CustomerOrderService {
         order.setFoodSubtotal(bill.foodSubtotal());
         order.setGrocerySubtotal(bill.grocerySubtotal());
         order.setDeliveryFee(bill.deliveryFee());
-        order.setDeliveryDistanceMeters(cart.roadKm() == null ? null : (int) Math.round(cart.roadKm() * 1000));
+        order.setDeliveryDistanceMeters(cart.feeKm() == null ? null : (int) Math.round(cart.feeKm() * 1000));
         order.setConvenienceFee(bill.convenienceFee());
         order.setTaxes(bill.taxes());
         order.setDiscount(bill.discount());

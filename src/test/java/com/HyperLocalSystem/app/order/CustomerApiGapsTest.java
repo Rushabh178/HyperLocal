@@ -25,9 +25,9 @@ class CustomerApiGapsTest extends IntegrationTest {
         assertThat((Double) read(search, "$.dishes[0].price")).isEqualTo(180.0);
         assertThat((Boolean) read(search, "$.dishes[0].available")).isTrue();
 
-        // Menu header: distance (by road: 1 km x 1.3), ETA, rating, open.
+        // Menu header: distance, ETA, rating, open.
         String menu = get("/api/v1/catalog/restaurants/" + restaurant.id() + "/menu?" + latLng(0, 0), null);
-        assertThat((Double) read(menu, "$.distanceKm")).isEqualTo(1.3);
+        assertThat((Double) read(menu, "$.distanceKm")).isEqualTo(1.0);
         assertThat((Integer) read(menu, "$.etaMinutes")).isGreaterThan(15);
         assertThat((Object) read(menu, "$.rating")).isNull();
         assertThat((Integer) read(menu, "$.ratingCount")).isZero();
