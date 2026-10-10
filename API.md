@@ -7,7 +7,7 @@ Base URL: `http://localhost:8080/api/v1`
 ## Running locally
 Needs Java 25+, PostgreSQL with PostGIS, and (for tests) Docker.
 1. `cp .env.example .env` and fill it in; `.env` is git-ignored and loaded automatically, real environment variables win.
-2. `./mvnw spring-boot:run`. Hibernate creates/updates the tables, then `db/indexes.sql` adds the GiST and partial unique indexes.
+2. `./mvnw spring-boot:run`. for local development uncomment `spring.profiles.active=dev` in your `.env` (or set `SPRING_PROFILES_ACTIVE=dev`) (`dev` is never on by default; see Profiles below). Hibernate creates/updates the tables, then `db/indexes.sql` adds the GiST and partial unique indexes.
 3. `./mvnw test` runs the integration tests against a throwaway `postgis/postgis` container.
 
 | Variable | Required | Default | Purpose |
@@ -72,6 +72,7 @@ POST /api/v1/customer/auth/logout   (same for agent / merchant)
 → 204
 ```
 Every push carries the WebSocket envelope as FCM **data** (all values are strings): `type`, `sentAt`, and `data` (the JSON of the WebSocket `data`).
+
 | Type | Who | Shown as |
 |---|---|---|
 | `OFFER` | rider | **data-only, high priority**, TTL ends at the offer's `expiresAt` (a stale offer is never delivered late) |
@@ -79,12 +80,13 @@ Every push carries the WebSocket envelope as FCM **data** (all values are string
 | `STOP_ADDED` | rider | notification "+1 stop added" / the injection message |
 | `ORDER_STATUS` | customer | notification "Order update" / e.g. "Your order is on the way" |
 | `NEW_ORDER`, `ORDER_CANCELLED`, `BROADCAST_TAKEN`, `RIDER_ARRIVING`, `ORDER_PICKED_UP` | merchant | notification with a title and body |
+
 Other types are WebSocket-only. Example FCM data of a rider offer:
 ```json
 { "type": "OFFER", "sentAt": "2026-10-08T13:20:00Z",
   "data": "{\"offerId\":\"a3e0…\",\"orderIds\":[\"6f1c…\"],\"estimatedEarnings\":40.00,\"expiresAt\":\"2026-10-08T13:20:30Z\", …}" }
 ```
-In development pushes are only logged (`[DEV PUSH] …`); the `fcm` profile sends them through Firebase (`FIREBASE_CREDENTIALS` = path to the service-account JSON, or Google application-default credentials).
+In the `dev` profile pushes are only logged (`[DEV PUSH] …`); the `fcm` profile sends them through Firebase (`FIREBASE_CREDENTIALS` = path to the service-account JSON, or Google application-default credentials).
 
 ### Customer sign-up flow
 ```
@@ -227,7 +229,7 @@ Idempotency-Key: 4c1d…
 
 **Order status** (state machine; illegal moves return `409 ILLEGAL_STATE_TRANSITION`):
 `PENDING → CONFIRMED → (BATCHED →) PICKING → OUT_FOR_DELIVERY → COMPLETED`, and `CANCELLED` from anything before pickup.
-With the fake gateway (default) and wallet payments the order is `CONFIRMED` right away; with a real gateway it stays `PENDING` until the payment webhook confirms the hold.
+With the fake gateway (`dev` profile) and wallet payments the order is `CONFIRMED` right away; with a real gateway it stays `PENDING` until the payment webhook confirms the hold.
 Each part of the order also has its own status (`foodStatus` / `groceryStatus` internally): `AWAITING_PAYMENT → NEW → ACCEPTED ⇄ DELAYED → READY → PICKED_UP` for food, `AWAITING_PAYMENT → BROADCASTING → CLAIMED → READY → PICKED_UP` (or `UNFULFILLED` when no Kirana claims it or nothing is available) for groceries.
 
 Deleting the account (`DELETE /customer/me`) is refused with `409 ORDER_IN_PROGRESS` while an order is active.
@@ -244,7 +246,7 @@ Deleting the account (`DELETE /customer/me`) is refused with `409 ORDER_IN_PROGR
 Payment status: `HOLD_PENDING → HELD → CAPTURED → PARTIALLY_REFUNDED → REFUNDED`, `HOLD_PENDING/HELD → RELEASED`, `HOLD_PENDING → FAILED → HOLD_PENDING` (retry).
 Money flow: the hold is captured at the first pickup (Kirana QR / restaurant hand-over), which also records what each store is owed. Missing items and unavailable groceries are refunded to the **wallet**; cancelling releases an uncaptured hold or refunds the rest to the wallet.
 
-Gateways (`PaymentGateway`): without the `razorpay` profile a fake gateway is used. Its outcome is `payments.fake.default-outcome` (`SUCCESS`); **in the `dev` profile only**, a checkout or retry request can choose it with the header `X-Fake-Payment: SUCCESS | PENDING | FAIL` (ignored in any other profile). `PENDING` waits for a webhook `{"eventId","reference","type":"HOLD_CONFIRMED"|"HOLD_FAILED"}` signed as hex HMAC-SHA256 of the body with `PAYMENT_WEBHOOK_SECRET`. A Razorpay skeleton runs with the `razorpay` profile (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`).
+Gateways (`PaymentGateway`): the fake gateway exists **only in the `dev` profile** (without `razorpay`). Its outcome is `payments.fake.default-outcome` (`SUCCESS`), and a checkout or retry request can choose it with the header `X-Fake-Payment: SUCCESS | PENDING | FAIL`. Without `dev` there is no fake gateway, the header is ignored, and the app refuses to start unless a real gateway is configured. `PENDING` waits for a webhook `{"eventId","reference","type":"HOLD_CONFIRMED"|"HOLD_FAILED"}` signed as hex HMAC-SHA256 of the body with `PAYMENT_WEBHOOK_SECRET`. A Razorpay skeleton runs with the `razorpay` profile (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`).
 
 ---
 
@@ -348,7 +350,7 @@ Required documents: restaurants `FSSAI_CERT, SHOP_PHOTO, OWNER_ID`; Kiranas `SHO
 |---|---|---|---|
 | GET | `/me` | profile incl. `verificationStatus`, `rejectionReason`, `open`, `imageUrl`, `cuisines`, `openingHours`, `upiVpa` | ✅ |
 | PATCH | `/me` | partial: `storeName?, ownerName?, imageUrl?, openingHours?, cuisines?` (restaurants), `upiVpa?` → profile | ✅ |
-| POST | `/uploads` | `{purpose: DOCUMENT/STORE_PHOTO/ITEM_PHOTO, contentType}` → signed upload link (see below) | ✅ |
+| POST | `/uploads` | `{purpose: DOCUMENT/STORE_PHOTO/ITEM_PHOTO, contentType}` → signed upload link (see "Uploads, profile and documents" above) | ✅ |
 | GET | `/me/documents` | `{verificationStatus, missingDocuments, documents}` | ✅ |
 | PUT | `/me/documents/{type}` | `{documentNumber?, fileUrl}`; types `FSSAI_CERT, GST_CERT, SHOP_PHOTO, OWNER_ID, BANK_PROOF`; `409 DOCUMENTS_LOCKED` once approved | ✅ |
 | PUT | `/me/password` | `currentPassword, newPassword` | ✅ |
@@ -361,12 +363,13 @@ Required documents: restaurants `FSSAI_CERT, SHOP_PHOTO, OWNER_ID`; Kiranas `SHO
 | POST | `/orders/{id}/accept` `{prepMinutes 1-90}` | restaurant only; `NEW → ACCEPTED`, sets `prepDeadline` | ✅ |
 | POST | `/orders/{id}/delay` `{additionalMinutes 1-60, reason?}` | restaurant only; `→ DELAYED`, pushes `prepDeadline` back and holds back the Kirana broadcast | ✅ |
 | POST | `/orders/{id}/ready` | restaurant: food `ACCEPTED/DELAYED → READY`; Kirana: groceries `CLAIMED → READY` (its own claimed orders only, else `404`) | ✅ |
-
-Merchant order `status`: `NEW, ACCEPTED, DELAYED, READY, PICKED_UP, CANCELLED` (`PREPARING` is accepted as a filter alias of `ACCEPTED`). A Kirana's claimed order shows as `ACCEPTED` until it calls `/ready`. Illegal moves return `409 ILLEGAL_STATE_TRANSITION`; a Kirana calling a restaurant-only endpoint gets `403 RESTAURANT_ONLY` (and vice versa `403 KIRANA_ONLY`).
 | GET | `/items?page&size` | paginated (`{items, page, size, totalItems}`), by category then name | ✅ |
 | POST | `/items` | see body below → 201 | ✅ |
 | PUT | `/items/{id}` | same body as POST | ✅ |
 | PATCH | `/items/{id}/availability` | `{available}` | ✅ |
+
+
+Merchant order `status`: `NEW, ACCEPTED, DELAYED, READY, PICKED_UP, CANCELLED` (`PREPARING` is accepted as a filter alias of `ACCEPTED`). A Kirana's claimed order shows as `ACCEPTED` until it calls `/ready`. Illegal moves return `409 ILLEGAL_STATE_TRANSITION`; a Kirana calling a restaurant-only endpoint gets `403 RESTAURANT_ONLY` (and vice versa `403 KIRANA_ONLY`).
 
 Item body: `name`, `description?`, `price` (> 0), `category`, `veg?`, `zone` (HOT/COLD/AMBIENT), `imageUrl?`, `available`, and for groceries `brand?`, `packSize?`, `mrp?`.
 The item's `itemType` follows the store: restaurants create `FOOD`, Kiranas create `GROCERY`. Grocery listings form the "virtual warehouse": customers see products listed by any Kirana within 2 km, and whichever nearby Kirana claims the order fulfils it.
