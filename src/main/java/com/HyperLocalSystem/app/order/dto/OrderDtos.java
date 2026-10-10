@@ -90,6 +90,10 @@ public final class OrderDtos {
                               BillSummary bill) {
     }
 
+    /** GROCERIES_UNFULFILLED message: the groceries were dropped, {@code refundAmount} went to the wallet. */
+    public record GroceriesUnfulfilled(UUID orderId, BigDecimal refundAmount, String reason, BillSummary bill) {
+    }
+
     /** One icon on the unified timeline; icons light up in sequence as the single courier advances. */
     public record TimelineStop(StopType type, String name, StopState state, Instant eta, Instant completedAt) {
     }

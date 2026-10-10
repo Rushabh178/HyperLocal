@@ -211,6 +211,16 @@ public class UnifiedOrder {
         return kiranaId != null && (groceryStatus == PartStatus.CLAIMED || groceryStatus == PartStatus.READY);
     }
 
+    /**
+     * The goods are settled enough to send a rider: groceries claimed by a Kirana, or food with no
+     * grocery part still being looked for. A mixed order waits until its groceries are claimed or
+     * given up (UNFULFILLED), so the rider never leaves the restaurant before the Kirana stop exists.
+     * Must match {@code UnifiedOrderRepository.AWAITING_RIDER}.
+     */
+    public boolean readyForRider() {
+        return isGroceryClaimed() || hasFood() && (!hasGroceries() || groceryStatus == PartStatus.UNFULFILLED);
+    }
+
     private static ApiException illegal(String what, Object from, Object to) {
         return ApiException.conflict("ILLEGAL_STATE_TRANSITION", what + " can't go from " + from + " to " + to);
     }

@@ -30,6 +30,11 @@ public class Notifier {
         send(customerId, Role.CUSTOMER, RealtimePublisher.CUSTOMER_QUEUE, RealtimeMessage.of(type, data));
     }
 
+    /** WebSocket only, even for a type that is normally pushed too (another message carries the push). */
+    public void customerLive(UUID customerId, EventType type, Object data) {
+        realtime.send(customerId, RealtimePublisher.CUSTOMER_QUEUE, RealtimeMessage.of(type, data));
+    }
+
     public void rider(UUID agentId, EventType type, Object data) {
         send(agentId, Role.DELIVERY_AGENT, RealtimePublisher.RIDER_QUEUE, RealtimeMessage.of(type, data));
     }

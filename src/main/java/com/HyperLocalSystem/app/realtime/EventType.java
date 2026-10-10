@@ -9,6 +9,8 @@ public enum EventType {
     STOPS_UPDATED,
     PAYMENT_CONFIRMED,
     PAYMENT_FAILED,
+    /** The groceries of a mixed order couldn't be got; their share went back to the wallet. */
+    GROCERIES_UNFULFILLED,
 
     // ---- rider, on /user/queue/route-updates
     OFFER,

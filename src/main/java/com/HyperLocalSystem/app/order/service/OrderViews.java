@@ -47,7 +47,12 @@ public class OrderViews {
     public List<TrackingStop> stops(UnifiedOrder order) {
         List<RouteStop> routeStops = stops.findByOrderIdOrderBySequence(order.getId());
         if (!routeStops.isEmpty()) {
-            return routeStops.stream().map(OrderViews::toTrackingStop).toList();
+            List<TrackingStop> line = new ArrayList<>(routeStops.stream().map(OrderViews::toTrackingStop).toList());
+            boolean kiranaOnRoute = routeStops.stream().anyMatch(s -> s.getType() == StopType.KIRANA);
+            if (order.getGroceryStatus() == PartStatus.UNFULFILLED && !kiranaOnRoute) {
+                line.addFirst(new TrackingStop(null, StopType.KIRANA, "Groceries unavailable", TrackingStopStatus.SKIPPED, null));
+            }
+            return line;
         }
         List<TrackingStop> planned = new ArrayList<>();
         if (order.hasGroceries()) {

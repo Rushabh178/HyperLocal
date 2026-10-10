@@ -27,13 +27,18 @@ public class BillCalculator {
             BigDecimal zero = money(BigDecimal.ZERO);
             return new BillSummary(zero, zero, zero, zero, zero, zero, zero, zero, zero);
         }
-        BigDecimal deliveryFee = deliveryWaived(food, grocery) ? BigDecimal.ZERO : ops.deliveryFee();
+        BigDecimal deliveryFee = deliveryFee(food, grocery);
         BigDecimal convenienceFee = ops.convenienceFee();
         BigDecimal taxes = food.multiply(ops.foodTaxRate());
         BigDecimal discount = BigDecimal.ZERO;
         BigDecimal total = food.add(grocery).add(deliveryFee).add(convenienceFee).add(taxes).subtract(discount);
         return new BillSummary(food, grocery, money(deliveryFee), money(convenienceFee), money(taxes),
                 money(discount), money(total), money(BigDecimal.ZERO), money(total));
+    }
+
+    /** The delivery fee these subtotals pay (also used to work out what a refund of the groceries gives back). */
+    public BigDecimal deliveryFee(BigDecimal food, BigDecimal grocery) {
+        return deliveryWaived(food, grocery) ? BigDecimal.ZERO : properties.ops().deliveryFee();
     }
 
     public boolean deliveryWaived(BigDecimal food, BigDecimal grocery) {

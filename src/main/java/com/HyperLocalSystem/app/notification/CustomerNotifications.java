@@ -6,8 +6,11 @@ import com.HyperLocalSystem.app.common.geo.GeoPoint;
 import com.HyperLocalSystem.app.common.geo.GeoUtils;
 import com.HyperLocalSystem.app.dispatch.DispatchEvents.StopChangedEvent;
 import com.HyperLocalSystem.app.dispatch.repository.RouteStopRepository;
+import com.HyperLocalSystem.app.order.dto.OrderDtos.GroceriesUnfulfilled;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.PaymentUpdate;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.RiderLocation;
+import com.HyperLocalSystem.app.order.dto.OrderDtos.StopsUpdate;
+import com.HyperLocalSystem.app.order.event.OrderEvents.GroceriesUnfulfilledEvent;
 import com.HyperLocalSystem.app.order.event.OrderEvents.OrderStatusChangedEvent;
 import com.HyperLocalSystem.app.order.repository.UnifiedOrderRepository;
 import com.HyperLocalSystem.app.order.service.OrderViews;
@@ -56,6 +59,23 @@ public class CustomerNotifications {
     public void onStopChanged(StopChangedEvent event) {
         orders.findById(event.orderId()).ifPresent(order ->
                 notifier.customer(order.getCustomerId(), EventType.STOPS_UPDATED, orderViews.stopsUpdate(order)));
+    }
+
+    /**
+     * The groceries were dropped and refunded: the screen repaints from ORDER_STATUS and STOPS_UPDATED
+     * (WebSocket only), and GROCERIES_UNFULFILLED is the one push that says why and how much came back.
+     */
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+    public void onGroceriesUnfulfilled(GroceriesUnfulfilledEvent event) {
+        orders.findById(event.orderId()).ifPresent(order -> {
+            notifier.customerLive(order.getCustomerId(), EventType.ORDER_STATUS, trackingService.snapshot(order));
+            StopsUpdate update = orderViews.stopsUpdate(order);
+            notifier.customerLive(order.getCustomerId(), EventType.STOPS_UPDATED, update);
+            notifier.customer(order.getCustomerId(), EventType.GROCERIES_UNFULFILLED,
+                    new GroceriesUnfulfilled(order.getId(), event.refund(), event.reason(), update.bill()));
+        });
     }
 
     @Async

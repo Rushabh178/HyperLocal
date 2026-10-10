@@ -39,12 +39,14 @@ public interface UnifiedOrderRepository extends JpaRepository<UnifiedOrder, UUID
     Page<UnifiedOrder> findByDeliveryAgentIdAndStatusOrderByCompletedAtDesc(UUID agentId, OrderStatus status, Pageable pageable);
 
     /**
-     * Confirmed orders that still need a rider: food orders right away, grocery-only ones once a
-     * Kirana has claimed them, and only while no offer is pending.
+     * Confirmed orders that still need a rider, only while no offer is pending: food-only orders right
+     * away; orders with groceries once a Kirana has claimed them; a mixed order whose groceries were
+     * given up (UNFULFILLED) goes on with the food alone. Same rule as {@code UnifiedOrder.readyForRider}.
      */
     String AWAITING_RIDER = """
             o.status = 'CONFIRMED' and o.delivery_agent_id is null
-              and (o.food_status is not null or o.grocery_status in ('CLAIMED', 'READY'))
+              and (o.grocery_status in ('CLAIMED', 'READY')
+                   or o.food_status is not null and (o.grocery_status is null or o.grocery_status = 'UNFULFILLED'))
               and not exists (select 1 from task_offers t where t.order_id = o.order_id and t.status = 'OFFERED')
             """;
 

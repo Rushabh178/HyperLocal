@@ -20,8 +20,7 @@ import com.HyperLocalSystem.app.order.entity.PartStatus;
 import com.HyperLocalSystem.app.order.entity.UnifiedOrder;
 import com.HyperLocalSystem.app.order.event.OrderEvents.KiranaClaimedEvent;
 import com.HyperLocalSystem.app.order.repository.UnifiedOrderRepository;
-import com.HyperLocalSystem.app.order.service.OrderLifecycle;
-import com.HyperLocalSystem.app.payment.service.PaymentService;
+import com.HyperLocalSystem.app.order.service.UnfulfilledGroceries;
 import com.HyperLocalSystem.app.spatial.SpatialIndexService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -51,8 +50,7 @@ public class KiranaBroadcastService {
     private final UnifiedOrderRepository orders;
     private final MerchantRepository merchants;
     private final SpatialIndexService spatialIndex;
-    private final OrderLifecycle lifecycle;
-    private final PaymentService paymentService;
+    private final UnfulfilledGroceries unfulfilledGroceries;
     private final AppProperties properties;
     private final ApplicationEventPublisher events;
 
@@ -128,18 +126,12 @@ public class KiranaBroadcastService {
 
     /**
      * No Kirana anywhere in range: a grocery-only order is cancelled (money back); a combined order
-     * carries on with the food and the grocery amount goes back to the wallet.
-     * TODO(edge-case): fall back to the dark-store hub before giving up; recompute the delivery fee.
+     * carries on with the food and the groceries' share goes back to the wallet ({@link UnfulfilledGroceries}).
+     * TODO(edge-case): fall back to the dark-store hub before giving up.
      */
     private void unfulfilled(UnifiedOrder order) {
         log.info("Groceries of order {} unfulfilled: no Kirana claimed them", order.getId());
-        order.moveGroceryTo(PartStatus.UNFULFILLED);
-        if (!order.hasFood()) {
-            lifecycle.cancel(order, "No store nearby had these items");
-        } else {
-            paymentService.partialRefundToWallet(order.getId(), order.getGrocerySubtotal(),
-                    "Groceries unavailable nearby", "refund:groceries:" + order.getId());
-        }
+        unfulfilledGroceries.apply(order, "No store nearby had these items");
     }
 
     /**

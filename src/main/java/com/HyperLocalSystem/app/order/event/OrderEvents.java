@@ -2,6 +2,7 @@ package com.HyperLocalSystem.app.order.event;
 
 import com.HyperLocalSystem.app.order.entity.OrderStatus;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.UUID;
 
@@ -34,6 +35,14 @@ public final class OrderEvents {
 
     /** A Kirana tapped "Items in Hand" first: add its pickup to the rider's route (or start dispatch). */
     public record KiranaClaimedEvent(UUID orderId, UUID merchantId) {
+    }
+
+    /**
+     * The grocery part ended UNFULFILLED while the food carries on (the broadcast gave up, nothing was
+     * available at the Kirana, or the drop happened without them). {@code refund} is what went back to
+     * the wallet now: zero when an earlier path already refunded it.
+     */
+    public record GroceriesUnfulfilledEvent(UUID orderId, UUID customerId, BigDecimal refund, String reason) {
     }
 
     /** The restaurant reported a kitchen delay: hold back the Kirana broadcast by {@code delay}. */

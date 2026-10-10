@@ -42,6 +42,7 @@ import com.HyperLocalSystem.app.order.entity.UnifiedOrder;
 import com.HyperLocalSystem.app.order.repository.OrderItemRepository;
 import com.HyperLocalSystem.app.order.repository.UnifiedOrderRepository;
 import com.HyperLocalSystem.app.order.service.OrderLifecycle;
+import com.HyperLocalSystem.app.order.service.UnfulfilledGroceries;
 import com.HyperLocalSystem.app.payment.service.PaymentService;
 import com.HyperLocalSystem.app.security.Hashing;
 import lombok.RequiredArgsConstructor;
@@ -82,6 +83,7 @@ public class AgentTaskService {
     private final DispatchOrchestrator dispatch;
     private final OrderLifecycle lifecycle;
     private final PaymentService paymentService;
+    private final UnfulfilledGroceries unfulfilledGroceries;
     private final StoreQrService storeQrService;
     private final AppProperties properties;
     private final ApplicationEventPublisher events;
@@ -204,7 +206,7 @@ public class AgentTaskService {
         BigDecimal available = sum(groceries.stream().filter(item -> !item.isDeficient()).toList());
         BigDecimal missing = sum(groceries.stream().filter(OrderItem::isDeficient).toList());
         if (available.signum() == 0) {
-            nothingAvailable(agentId, stop, order, missing);
+            nothingAvailable(agentId, stop, order);
             return routeResponse(agentId);
         }
         order.moveGroceryTo(PartStatus.PICKED_UP);
@@ -219,18 +221,17 @@ public class AgentTaskService {
     }
 
     /** Every item was missing: drop the stop; cancel a grocery-only order, refund the groceries of a combined one. */
-    private void nothingAvailable(UUID agentId, RouteStop stop, UnifiedOrder order, BigDecimal missing) {
+    private void nothingAvailable(UUID agentId, RouteStop stop, UnifiedOrder order) {
         stop.setState(StopState.SKIPPED);
         events.publishEvent(new StopChangedEvent(stop.getId(), stop.getOrderId(), StopChange.SKIPPED));
-        order.moveGroceryTo(PartStatus.UNFULFILLED);
         if (!order.hasFood()) {
+            order.moveGroceryTo(PartStatus.UNFULFILLED);
             RoutePlanner.skipRemaining(stops.findByOrderIdOrderBySequence(order.getId()));
             lifecycle.cancel(order, "None of the items were available at the store");
             stops.flush();
             dispatch.completeRouteIfDone(agentId);
         } else {
-            paymentService.partialRefundToWallet(order.getId(), missing, "Items missing at " + stop.getName(),
-                    "refund:missing:" + stop.getId());
+            unfulfilledGroceries.apply(order, "None of the groceries were available at " + stop.getName());
             afterPickup(order);
         }
     }
@@ -257,6 +258,10 @@ public class AgentTaskService {
         currentStop(agentId, drop.getId());
         if (!Hashing.constantTimeEquals(order.getDeliveryOtp(), request.deliveryOtp())) {
             throw ApiException.badRequest("DELIVERY_OTP_INVALID", "The code doesn't match. Ask the customer to check the app.");
+        }
+        // Groceries that never reached the bag aren't paid for (no-op if they were already given up and refunded).
+        if (order.hasGroceries() && order.getGroceryStatus() != PartStatus.PICKED_UP) {
+            unfulfilledGroceries.apply(order, "Your groceries couldn't be picked up");
         }
         complete(drop);
         lifecycle.moveTo(order, OrderStatus.COMPLETED);

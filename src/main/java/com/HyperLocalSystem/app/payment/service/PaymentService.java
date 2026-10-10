@@ -169,19 +169,22 @@ public class PaymentService {
      * Missing items / unavailable groceries: credit {@code amount} to the customer's wallet.
      * A still-held UPI payment is captured first, so a later cancellation can only ever refund what
      * is left. Idempotent on {@code reference}.
+     *
+     * @return what was credited now; zero if nothing was (already refunded under this reference, or nothing left)
      */
     @Transactional
-    public void partialRefundToWallet(UUID orderId, BigDecimal amount, String reason, String reference) {
+    public BigDecimal partialRefundToWallet(UUID orderId, BigDecimal amount, String reason, String reference) {
         Payment payment = load(orderId);
         ensureCaptured(payment);
         BigDecimal refundable = payment.getCapturedAmount().subtract(payment.getRefundedAmount());
         BigDecimal refund = amount.min(refundable);
         if (refund.signum() <= 0 || !walletService.credit(payment.getCustomerId(), refund, reason, orderId, reference)) {
-            return;
+            return BigDecimal.ZERO;
         }
         payment.setRefundedAmount(payment.getRefundedAmount().add(refund));
         payment.moveTo(payment.getRefundedAmount().compareTo(payment.getCapturedAmount()) >= 0
                 ? PaymentStatus.REFUNDED : PaymentStatus.PARTIALLY_REFUNDED);
+        return refund;
     }
 
     private void ensureCaptured(Payment payment) {

@@ -7,6 +7,7 @@ import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.KiranaBroadcast;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.MerchantOrder;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.OrderCancelledNotice;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.RiderArrivingNotice;
+import com.HyperLocalSystem.app.order.dto.OrderDtos.GroceriesUnfulfilled;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.TrackingResponse;
 import com.HyperLocalSystem.app.realtime.RealtimeMessage;
 
@@ -30,6 +31,12 @@ public final class PushContent {
             // ---- customer
             case ORDER_STATUS -> PushMessage.notification(message, "Order update",
                     customerText((TrackingResponse) message.data()));
+            case GROCERIES_UNFULFILLED -> {
+                GroceriesUnfulfilled data = (GroceriesUnfulfilled) message.data();
+                yield PushMessage.notification(message, "Groceries unavailable", data.refundAmount().signum() > 0
+                        ? "We couldn't get your groceries. ₹" + data.refundAmount().toPlainString() + " is back in your wallet; your food is on its way."
+                        : "We couldn't get your groceries; your food is on its way.");
+            }
             // ---- merchant
             case NEW_ORDER -> {
                 MerchantOrder order = (MerchantOrder) message.data();

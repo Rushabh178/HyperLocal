@@ -25,6 +25,7 @@ import com.HyperLocalSystem.app.merchant.repository.MerchantRepository;
 import com.HyperLocalSystem.app.order.entity.OrderStatus;
 import com.HyperLocalSystem.app.order.entity.PartStatus;
 import com.HyperLocalSystem.app.order.entity.UnifiedOrder;
+import com.HyperLocalSystem.app.order.event.OrderEvents.GroceriesUnfulfilledEvent;
 import com.HyperLocalSystem.app.order.event.OrderEvents.KiranaClaimedEvent;
 import com.HyperLocalSystem.app.order.event.OrderEvents.KitchenDelayedEvent;
 import com.HyperLocalSystem.app.order.event.OrderEvents.OrderCancelledEvent;
@@ -74,9 +75,10 @@ public class DispatchOrchestrator {
     // ----------------------------------------------------------------- event listeners
 
     /**
-     * Payment secured. In parallel: groceries go to the Kirana broadcast (held back a little for
-     * combined orders so they aren't picked up long before the food), and a food order gets a rider
-     * straight away. A grocery-only order waits for a Kirana to claim it before looking for a rider.
+     * Payment secured. Groceries go to the Kirana broadcast (held back a little for combined orders so
+     * they aren't picked up long before the food); a food-only order gets a rider straight away. An
+     * order with groceries (mixed or not) waits for a Kirana to claim them, or for them to be given
+     * up, before looking for a rider: see {@link UnifiedOrder#readyForRider()}.
      */
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -90,12 +92,15 @@ public class DispatchOrchestrator {
             Instant startsAt = order.hasFood() ? Instant.now().plus(properties.ops().kiranaBroadcastCombinedDelay()) : Instant.now();
             broadcastService.schedule(order, 1, startsAt);
         }
-        if (order.hasFood()) {
+        if (order.readyForRider()) {
             offerNextRider(order);
         }
     }
 
-    /** A Kirana has the groceries: add the pickup to the rider's route, or (grocery-only) dispatch it. */
+    /**
+     * A Kirana has the groceries: the order can now get a rider (mixed orders were held for this).
+     * An order that already has one (dispatched before the hold existed) gets the Kirana stop added.
+     */
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -103,9 +108,19 @@ public class DispatchOrchestrator {
         UnifiedOrder order = orders.findById(event.orderId()).orElseThrow();
         if (order.getDeliveryAgentId() != null) {
             insertKiranaStop(order);
-        } else if (!order.hasFood()) {
+        } else {
             dispatch(order);
         }
+    }
+
+    /** The groceries were given up: close any round still running, and send the food on alone. */
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void onGroceriesUnfulfilled(GroceriesUnfulfilledEvent event) {
+        broadcastService.cancelFor(event.orderId());
+        // Same guard as the poller: skip if an offer is already out (e.g. made by onOrderConfirmed).
+        orders.lockIfAwaitingRider(event.orderId()).ifPresent(this::offerNextRider);
     }
 
     @Async
@@ -160,7 +175,7 @@ public class DispatchOrchestrator {
     @Transactional
     public boolean offerNextRider(UnifiedOrder order) {
         boolean needsRider = order.getStatus() == OrderStatus.CONFIRMED && order.getDeliveryAgentId() == null
-                && (order.hasFood() || order.isGroceryClaimed());
+                && order.readyForRider();
         if (!needsRider) {
             return false;
         }

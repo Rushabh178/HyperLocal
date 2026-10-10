@@ -7,7 +7,7 @@ Base URL: `http://localhost:8080/api/v1`
 ## Running locally
 Needs Java 25+, PostgreSQL with PostGIS, and (for tests) Docker.
 1. `cp .env.example .env` and fill it in; `.env` is git-ignored and loaded automatically, real environment variables win.
-2. `./mvnw spring-boot:run`. for local development uncomment `spring.profiles.active=dev` in your `.env` (or set `SPRING_PROFILES_ACTIVE=dev`) (`dev` is never on by default; see Profiles below). Hibernate creates/updates the tables, then `db/indexes.sql` adds the GiST and partial unique indexes.
+2. `./mvnw spring-boot:run`. For local development uncomment `spring.profiles.active=dev` in your `.env` or set `SPRING_PROFILES_ACTIVE=dev` (`dev` is never on by default; see Profiles below). Hibernate creates/updates the tables, then `db/indexes.sql` adds the GiST and partial unique indexes.
 3. `./mvnw test` runs the integration tests against a throwaway `postgis/postgis` container.
 
 | Variable | Required | Default | Purpose |
@@ -79,6 +79,7 @@ Every push carries the WebSocket envelope as FCM **data** (all values are string
 | `BROADCAST_OFFER` | Kirana | **data-only, high priority**, TTL ends at `expiresAt` |
 | `STOP_ADDED` | rider | notification "+1 stop added" / the injection message |
 | `ORDER_STATUS` | customer | notification "Order update" / e.g. "Your order is on the way" |
+| `GROCERIES_UNFULFILLED` | customer | notification "Groceries unavailable" / "We couldn't get your groceries. ₹60.00 is back in your wallet; your food is on its way." (the `ORDER_STATUS` sent with it is WebSocket-only) |
 | `NEW_ORDER`, `ORDER_CANCELLED`, `BROADCAST_TAKEN`, `RIDER_ARRIVING`, `ORDER_PICKED_UP` | merchant | notification with a title and body |
 
 Other types are WebSocket-only. Example FCM data of a rider offer:
@@ -230,7 +231,19 @@ Idempotency-Key: 4c1d…
 **Order status** (state machine; illegal moves return `409 ILLEGAL_STATE_TRANSITION`):
 `PENDING → CONFIRMED → (BATCHED →) PICKING → OUT_FOR_DELIVERY → COMPLETED`, and `CANCELLED` from anything before pickup.
 With the fake gateway (`dev` profile) and wallet payments the order is `CONFIRMED` right away; with a real gateway it stays `PENDING` until the payment webhook confirms the hold.
-Each part of the order also has its own status (`foodStatus` / `groceryStatus` internally): `AWAITING_PAYMENT → NEW → ACCEPTED ⇄ DELAYED → READY → PICKED_UP` for food, `AWAITING_PAYMENT → BROADCASTING → CLAIMED → READY → PICKED_UP` (or `UNFULFILLED` when no Kirana claims it or nothing is available) for groceries.
+Each part of the order also has its own status (`foodStatus` / `groceryStatus` internally): `AWAITING_PAYMENT → NEW → ACCEPTED ⇄ DELAYED → READY → PICKED_UP` for food, `AWAITING_PAYMENT → BROADCASTING → CLAIMED → READY → PICKED_UP` (or `UNFULFILLED` when no Kirana claims it, nothing is available, or the drop happens without them) for groceries.
+
+**Food + groceries in one order (mixed orders):**
+- **Dispatch waits for the groceries.** The restaurant gets its ticket and the Kiranas the broadcast as usual, but no rider is offered the order until the groceries are `CLAIMED`/`READY` (the route is then Kirana → Restaurant → Home) or `UNFULFILLED` (the food goes alone). Food-only and grocery-only orders dispatch as before.
+- **Groceries that weren't picked up are never paid for.** When the grocery part becomes `UNFULFILLED` (the broadcast found nobody, nothing was available at the Kirana, or the drop completed without them), the customer gets the groceries' share back in the **wallet**: their subtotal, their GST (none, groceries are tax-inclusive) and any delivery fee the food alone wouldn't have paid. The convenience fee is per order and stays. If nothing else remains the order is cancelled instead (hold released or everything refunded).
+- One refund per order part, whichever path fires first (wallet reference `refund:groceries:<orderId>`); later paths are no-ops.
+- The customer sees it in `bill.refunds` / `bill.netTotal`, a `SKIPPED` Kirana stop named "Groceries unavailable", the `ORDER_STATUS` + `STOPS_UPDATED` messages and a `GROCERIES_UNFULFILLED` message (also a push):
+```json
+{ "type": "GROCERIES_UNFULFILLED", "sentAt": "…",
+  "data": { "orderId": "6f1c…", "refundAmount": 60.00, "reason": "No store nearby had these items",
+            "bill": { "foodSubtotal": 180.00, "grocerySubtotal": 60.00, "deliveryFee": 0.00, "convenienceFee": 10.00, "taxes": 9.00,
+                      "discount": 0.00, "total": 259.00, "refunds": 60.00, "netTotal": 199.00 } } }
+```
 
 Deleting the account (`DELETE /customer/me`) is refused with `409 ORDER_IN_PROGRESS` while an order is active.
 
@@ -244,7 +257,7 @@ Deleting the account (`DELETE /customer/me`) is refused with `409 ORDER_IN_PROGR
 | GET | `/customer/wallet/transactions?page&size` | newest first | ✅ |
 
 Payment status: `HOLD_PENDING → HELD → CAPTURED → PARTIALLY_REFUNDED → REFUNDED`, `HOLD_PENDING/HELD → RELEASED`, `HOLD_PENDING → FAILED → HOLD_PENDING` (retry).
-Money flow: the hold is captured at the first pickup (Kirana QR / restaurant hand-over), which also records what each store is owed. Missing items and unavailable groceries are refunded to the **wallet**; cancelling releases an uncaptured hold or refunds the rest to the wallet.
+Money flow: the hold is captured at the first pickup (Kirana QR / restaurant hand-over), which also records what each store is owed (a refund before any pickup captures it first). Missing items and unavailable groceries are refunded to the **wallet**; cancelling releases an uncaptured hold or refunds the rest to the wallet.
 
 Gateways (`PaymentGateway`): the fake gateway exists **only in the `dev` profile** (without `razorpay`). Its outcome is `payments.fake.default-outcome` (`SUCCESS`), and a checkout or retry request can choose it with the header `X-Fake-Payment: SUCCESS | PENDING | FAIL`. Without `dev` there is no fake gateway, the header is ignored, and the app refuses to start unless a real gateway is configured. `PENDING` waits for a webhook `{"eventId","reference","type":"HOLD_CONFIRMED"|"HOLD_FAILED"}` signed as hex HMAC-SHA256 of the body with `PAYMENT_WEBHOOK_SECRET`. A Razorpay skeleton runs with the `razorpay` profile (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`).
 
@@ -278,10 +291,10 @@ Approved, online partners only. Offers reach the nearest free rider (H3 cells + 
 | GET | `/route` | `{routeId, locked:true, stops[{stopId, sequence, type, name, address, location, orderIds, items, state, eta}], remainingDistanceMeters, estimatedCompletionAt}`; `404` when no active route | ✅ |
 | POST | `/route/stops/{stopId}/arrived` | pickup step 1 (also used at the customer); tells the store `RIDER_ARRIVING` | ✅ |
 | POST | `/route/stops/{stopId}/deficient` `{itemIds:[…], reason?}` | pickup step 2, **Kirana only, optional**: mark missing items (stop item ids). Only after Arrived (`409 NOT_ARRIVED`) and before the scan (`409 STOP_ALREADY_COMPLETED`) | ✅ |
-| POST | `/route/stops/{stopId}/scan-qr` `{qrPayload}` | pickup step 3 at **every** store: the store's QR must match (`400 QR_WRONG_STORE` / `QR_INVALID` / `QR_EXPIRED` / `QR_REQUIRED`), needs Arrived (`409 NOT_ARRIVED`). Completes the stop. Kirana: the shop is settled for the available items only and the missing ones are refunded to the customer's wallet (nothing available → stop skipped; a grocery-only order is cancelled). Restaurant: food picked up, restaurant settled | ✅ |
+| POST | `/route/stops/{stopId}/scan-qr` `{qrPayload}` | pickup step 3 at **every** store: the store's QR must match (`400 QR_WRONG_STORE` / `QR_INVALID` / `QR_EXPIRED` / `QR_REQUIRED`), needs Arrived (`409 NOT_ARRIVED`). Completes the stop. Kirana: the shop is settled for the available items only and the missing ones are refunded to the customer's wallet (nothing available → stop skipped, groceries `UNFULFILLED`: a grocery-only order is cancelled, a mixed one refunds the groceries' share). Restaurant: food picked up, restaurant settled | ✅ |
 | POST | `/route/stops/{stopId}/kirana-qr` · `/route/stops/{stopId}/picked-up` | aliases of `scan-qr` (same `{qrPayload}` body) | ✅ |
 | POST | `/route/stops/{stopId}/items/{itemId}/deficient` | alias of `deficient` for one item | ✅ |
-| POST | `/orders/{orderId}/deliver` `{deliveryOtp}` | 4-digit code from the customer; `400 DELIVERY_OTP_INVALID`. Completes the order, books earnings, frees the rider when the route is empty | ✅ |
+| POST | `/orders/{orderId}/deliver` `{deliveryOtp}` | 4-digit code from the customer; `400 DELIVERY_OTP_INVALID`. Completes the order, books earnings, frees the rider when the route is empty. Groceries not picked up by then become `UNFULFILLED` and are refunded (see mixed orders) | ✅ |
 | POST | `/route/injections/{id}/ack` | 204 | ✅ |
 | GET | `/deliveries?page&size` | `{orderId, batched, stops, earnings, completedAt}` | ✅ |
 | GET | `/earnings?period=TODAY/WEEK/MONTH&page&size` | Indian time; base ₹30 per order + ₹10 per extra pickup + batching incentives, `tripCount`, today's `onlineMinutes` and paged `payouts` (example below) | ✅ |
@@ -303,7 +316,7 @@ GET /api/v1/agent/earnings?period=WEEK
 ```
 `onlineMinutes` is always for today (Indian time), whatever the period.
 
-Stops must be worked in order (Linear Route Locking): acting on any stop but the current one returns `409 STOP_LOCKED`. One order's stops always run Kirana → Restaurant → Customer; a Kirana that claims after the rider accepted is inserted before the restaurant.
+Stops must be worked in order (Linear Route Locking): acting on any stop but the current one returns `409 STOP_LOCKED`. One order's stops always run Kirana → Restaurant → Customer. A mixed order is only offered once its groceries are claimed (or given up), so the Kirana stop is there from the start; for an order dispatched before that rule, a late Kirana stop is still inserted before the restaurant.
 
 ---
 
@@ -409,7 +422,7 @@ There is no admin sign-up. The first admin is created on startup from `ADMIN_EMA
 
 | App | Subscribe to | Types |
 |---|---|---|
-| Customer | `/user/queue/tracking` | `ORDER_STATUS`, `RIDER_LOCATION`, `STOPS_UPDATED`, `PAYMENT_CONFIRMED`, `PAYMENT_FAILED` |
+| Customer | `/user/queue/tracking` | `ORDER_STATUS`, `RIDER_LOCATION`, `STOPS_UPDATED`, `PAYMENT_CONFIRMED`, `PAYMENT_FAILED`, `GROCERIES_UNFULFILLED` |
 | Rider | `/user/queue/route-updates` | `OFFER`, `OFFER_WITHDRAWN`, `STOP_ADDED`, `ROUTE_UPDATED` |
 | Merchant | `/user/queue/merchant-events` | `NEW_ORDER`, `ORDER_CANCELLED`, `BROADCAST_OFFER`, `BROADCAST_TAKEN`, `RIDER_ARRIVING`, `ORDER_PICKED_UP` |
 
@@ -452,6 +465,8 @@ Every message on every queue has the same shape; switch on `type`, read `data`:
   "data": { "orderId": "6f1c…", "paymentId": "…", "paymentStatus": "FAILED", "orderStatus": "PENDING", "amount": 167.50,
             "message": "The payment didn't go through. Try again." } }
 ```
+
+`GROCERIES_UNFULFILLED`: the groceries of a mixed order were given up and their share refunded; example under "Food + groceries in one order" above. Arrives together with `ORDER_STATUS` and `STOPS_UPDATED`.
 
 ### Rider messages (`/user/queue/route-updates`)
 `OFFER`: `data` is the same object as an item of `GET /agent/offers`.
@@ -508,9 +523,9 @@ All of these come from domain events after they commit; nothing is sent from a c
 ## Internal engines (no HTTP endpoints)
 | Class | What it does | Status |
 |---|---|---|
-| `dispatch/DispatchOrchestrator` | reacts to order events after commit (async): starts the broadcast (combined orders wait `kirana-broadcast-combined-delay`, 2 min), offers food orders to the nearest rider at once, grocery-only orders once claimed; inserts late Kirana stops; postpones unstarted broadcasts on kitchen delays; cleans up on cancel | ✅ |
-| `dispatch/KiranaBroadcastService` | 5 nearest open Kiranas within 500 m, 60 s to claim, then the next ring (1 km); after the last round the groceries are `UNFULFILLED` (grocery-only orders are cancelled, combined orders refund the groceries to the wallet) | ✅ |
-| `dispatch/DispatchScheduler` | poller on every instance (`app.dispatch.poll-interval-ms`): opens/expands due broadcast rounds, expires offers, retries orders waiting for a rider; each row in its own transaction with `FOR UPDATE SKIP LOCKED` | ✅ |
+| `dispatch/DispatchOrchestrator` | reacts to order events after commit (async): starts the broadcast (combined orders wait `kirana-broadcast-combined-delay`, 2 min), offers food-only orders to the nearest rider at once, orders with groceries once claimed (or, mixed, once the groceries are given up); inserts late Kirana stops; postpones unstarted broadcasts on kitchen delays; cleans up on cancel | ✅ |
+| `dispatch/KiranaBroadcastService` | 5 nearest open Kiranas within 500 m, 60 s to claim, then the next ring (1 km); after the last round the groceries are `UNFULFILLED` (grocery-only orders are cancelled, combined orders refund the groceries' share through `order/UnfulfilledGroceries` and dispatch the food) | ✅ |
+| `dispatch/DispatchScheduler` | poller on every instance (`app.dispatch.poll-interval-ms`): opens/expands due broadcast rounds, expires offers, retries orders waiting for a rider (same rule as above: a mixed order only once its groceries are claimed or `UNFULFILLED`); each row in its own transaction with `FOR UPDATE SKIP LOCKED` | ✅ |
 | `batching/CoLinearBatchingEngine` | for a claimed grocery-only order: ACTIVE riders near the Kirana (H3), whose remaining route passes within 500 m of both the Kirana and the customer; every insertion that keeps existing stops in order is simulated and the cheapest one adding ≤ 4 min wins. The order becomes `BATCHED`, the rider earns ₹15 and gets the "+1 stop" push. Otherwise normal dispatch. The maths is in the pure `CoLinearBatchingAlgorithm` | ✅ |
 | `routing/RoutingClient` | `HaversineRoutingClient` (straight line × 1.3 at 20 km/h) by default; `OsrmRoutingClient` (`/route` + `/table`) with the `osrm` profile and `OSRM_BASE_URL` | ✅ |
 | `spatial/SpatialIndexService` | H3 cells (resolution 9) and the disk covering a radius | ✅ |
