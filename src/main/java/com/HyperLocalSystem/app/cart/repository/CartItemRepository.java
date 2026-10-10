@@ -26,4 +26,9 @@ public interface CartItemRepository extends JpaRepository<CartItem, UUID> {
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("delete from CartItem i where i.cartId = :cartId")
     void deleteByCartId(@Param("cartId") UUID cartId);
+
+    /** The store deleted the item: it leaves every cart. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("delete from CartItem i where i.itemId = :itemId")
+    void deleteByItemId(@Param("itemId") UUID itemId);
 }

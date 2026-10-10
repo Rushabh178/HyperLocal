@@ -123,7 +123,8 @@ public final class MerchantDtos {
 
     // ----------------------------------------------------------------- Kirana broadcast
 
-    public record BroadcastItem(String name, String packSize, int quantity) {
+    /** {@code itemId}: the order line (stable key for a packing checklist); {@code zone}: HOT / COLD / AMBIENT. */
+    public record BroadcastItem(String name, String packSize, int quantity, UUID itemId, TemperatureZone zone) {
     }
 
     /** A ping sent to the 5 nearest Kiranas. First to tap "Items in Hand" wins. */
@@ -167,6 +168,10 @@ public final class MerchantDtos {
 
     // ----------------------------------------------------------------- orders
 
+    /**
+     * An order card. {@code shortCode}: last 4 hex digits of the order id, upper case, for "#A3F9" on the
+     * card and at the counter; {@code createdAt} is when the customer placed it.
+     */
     public record MerchantOrder(
             UUID orderId,
             MerchantOrderStatus status,
@@ -174,7 +179,15 @@ public final class MerchantDtos {
             BigDecimal amount,
             Instant prepDeadline,
             String riderName,
-            Instant riderEta) {
+            Instant riderEta,
+            String customerNote,
+            Instant createdAt,
+            String shortCode) {
+
+        public static String shortCode(UUID orderId) {
+            String hex = orderId.toString().replace("-", "");
+            return hex.substring(hex.length() - 4).toUpperCase(java.util.Locale.ROOT);
+        }
     }
 
     public record AcceptOrderRequest(@Min(1) @Max(90) int prepMinutes) {

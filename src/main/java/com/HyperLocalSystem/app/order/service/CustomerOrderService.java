@@ -123,6 +123,7 @@ public class CustomerOrderService {
         order.setDiscount(bill.discount());
         order.setFinancialTotal(bill.total());
         order.setPaymentMethod(request.paymentMethod());
+        order.setCustomerNote(request.note() == null || request.note().isBlank() ? null : request.note().trim());
         order.setDeliveryOtp(Hashing.randomDigits(4));
         order.setIdempotencyKey(idempotencyKey == null || idempotencyKey.isBlank() ? null : idempotencyKey.trim());
         orders.saveAndFlush(order);
@@ -301,7 +302,7 @@ public class CustomerOrderService {
                 lines.stream().filter(l -> l.getType() == ItemType.FOOD).map(CustomerOrderService::toLine).toList(),
                 lines.stream().filter(l -> l.getType() == ItemType.GROCERY).map(CustomerOrderService::toLine).toList(),
                 bill, orderViews.missingItems(order), address, rider, otpVisible ? order.getDeliveryOtp() : null,
-                isCancellable(order), orderViews.stops(order), rating != null, rating, order.getCreatedAt());
+                isCancellable(order), orderViews.stops(order), rating != null, rating, order.getCustomerNote(), order.getCreatedAt());
     }
 
     static CartItemResponse toLine(OrderItem item) {

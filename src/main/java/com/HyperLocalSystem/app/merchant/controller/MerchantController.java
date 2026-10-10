@@ -32,6 +32,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -127,7 +128,7 @@ public class MerchantController {
 
     @GetMapping("/orders")
     public PageResponse<MerchantOrder> orders(@AuthenticationPrincipal Jwt jwt,
-                                              @RequestParam(required = false) MerchantOrderStatus status,
+                                              @RequestParam(required = false) List<MerchantOrderStatus> status,
                                               @RequestParam(defaultValue = "0") int page,
                                               @RequestParam(defaultValue = "20") int size) {
         return merchantService.orders(CurrentUser.id(jwt), status, page, size);
@@ -169,6 +170,12 @@ public class MerchantController {
     public CatalogItemResponse updateItem(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID itemId,
                                           @Valid @RequestBody CatalogItemRequest request) {
         return merchantService.updateItem(CurrentUser.id(jwt), itemId, request);
+    }
+
+    @DeleteMapping("/items/{itemId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteItem(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID itemId) {
+        merchantService.deleteItem(CurrentUser.id(jwt), itemId);
     }
 
     @PatchMapping("/items/{itemId}/availability")

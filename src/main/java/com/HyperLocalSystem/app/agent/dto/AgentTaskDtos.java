@@ -47,7 +47,9 @@ public final class AgentTaskDtos {
             List<UUID> orderIds,
             List<StopItem> items,
             StopState state,
-            Instant eta) {
+            Instant eta,
+            /** CUSTOMER stops only (once the rider has the order): the recipient's number, else the customer's. */
+            String contactPhone) {
     }
 
     /**
@@ -59,7 +61,21 @@ public final class AgentTaskDtos {
             boolean locked,
             List<RouteStop> stops,
             int remainingDistanceMeters,
-            Instant estimatedCompletionAt) {
+            Instant estimatedCompletionAt,
+            /** Only on the response of {@code /orders/{id}/deliver}: what the trip just paid. Null elsewhere. */
+            CompletedTrip completedTrip) {
+
+        public ActiveRouteResponse withCompletedTrip(CompletedTrip trip) {
+            return new ActiveRouteResponse(routeId, locked, stops, remainingDistanceMeters, estimatedCompletionAt, trip);
+        }
+    }
+
+    /** What one delivered order paid the rider, by component; {@code total} is their sum. */
+    public record TripBreakdown(BigDecimal basePay, BigDecimal multiStopBonus, BigDecimal batchBonus, BigDecimal distancePay,
+                                BigDecimal total) {
+    }
+
+    public record CompletedTrip(UUID orderId, TripBreakdown breakdown) {
     }
 
     public record RejectOfferRequest(@Size(max = 100) String reason) {
@@ -96,7 +112,8 @@ public final class AgentTaskDtos {
             boolean batched,
             int stops,
             BigDecimal earnings,
-            Instant completedAt) {
+            Instant completedAt,
+            TripBreakdown breakdown) {
     }
 
     /**

@@ -118,6 +118,12 @@ public class AgentTaskController {
         return taskService.history(CurrentUser.id(jwt), page, size);
     }
 
+    /** One delivered order with its pay breakdown; 404 unless this rider delivered it. */
+    @GetMapping("/deliveries/{orderId}")
+    public DeliveryHistoryItem delivery(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID orderId) {
+        return taskService.delivery(CurrentUser.id(jwt), orderId);
+    }
+
     /** Totals and trip count for the period, today's online minutes, and the payouts (paged). */
     @GetMapping("/earnings")
     public EarningsSummary earnings(@AuthenticationPrincipal Jwt jwt,

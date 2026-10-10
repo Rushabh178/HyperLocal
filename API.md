@@ -214,9 +214,9 @@ Nudge: a grocery-only cart under ₹150 gets `{groceryTotal, threshold, message,
 ### Orders: `/customer/orders`
 | Method | Path | Notes | Status |
 |---|---|---|---|
-| POST | `/checkout` `{addressId, paymentMethod UPI/WALLET}` + optional `Idempotency-Key` header | → 201 `{orderId, status, payableAmount, upiIntentUrl, payment}` (see "Paying" below). Re-validates and re-prices the cart, freezes it into an order, takes the payment, clears the cart. Same key again returns the first order. Errors: `400 CART_EMPTY`, `400 ADDRESS_NOT_SERVICEABLE`, `409 ITEM_UNAVAILABLE`, `409 STORE_CLOSED`, `409 INSUFFICIENT_WALLET_BALANCE` | ✅ |
+| POST | `/checkout` `{addressId, paymentMethod UPI/WALLET, note?}` + optional `Idempotency-Key` header | → 201 `{orderId, status, payableAmount, upiIntentUrl, payment}` (see "Paying" below). Re-validates and re-prices the cart, freezes it into an order, takes the payment, clears the cart. `note` (≤ 250 chars, e.g. "Less spicy please") is shown to the stores as `customerNote`. Same key again returns the first order. Errors: `400 CART_EMPTY`, `400 ADDRESS_NOT_SERVICEABLE`, `409 ITEM_UNAVAILABLE`, `409 STORE_CLOSED`, `409 INSUFFICIENT_WALLET_BALANCE` | ✅ |
 | GET | `/?status&page&size` | newest first; `{orderId, status, hasFood, hasGroceries, total, rated, createdAt}` | ✅ |
-| GET | `/{id}` | items, `bill` (after refunds), `missingItems`, address, `rider`, `deliveryOtp` (4 digits, shown while the order is active), `cancellable`, `stops`, `rated` + `rating` — example below | ✅ |
+| GET | `/{id}` | items, `bill` (after refunds), `missingItems`, address, `rider`, `deliveryOtp` (4 digits, shown while the order is active), `cancellable`, `stops`, `rated` + `rating`, `note` — example below | ✅ |
 | GET | `/{id}/timeline` | unified Kirana → Restaurant → Home line | ✅ |
 | GET | `/{id}/tracking` | `{orderId, status, agentLocation, etaMinutes, stops, updatedAt}` snapshot; live updates over WebSocket | ✅ |
 | POST | `/{id}/cancel` `{reason}` | only before pickup (`409 ORDER_NOT_CANCELLABLE` / `ORDER_ALREADY_PICKED_UP`); releases the UPI hold or refunds a wallet payment to the wallet | ✅ |
@@ -233,7 +233,7 @@ Order details:
   "deliveryAddress": { … },
   "rider": { "name": "Ravi", "phone": "+919812345678", "vehicleNumber": "MH12AB1234", "location": { "lat": 18.52, "lng": 73.85 } },
   "deliveryOtp": "4821", "cancellable": true,
-  "stops": [ … ], "rated": false, "rating": null, "createdAt": "…" }
+  "stops": [ … ], "rated": false, "rating": null, "note": "Less spicy please", "createdAt": "…" }
 ```
 `rider` is null until someone accepts; the phone is the real number for now (masking comes later). `missingItems[]` is `{itemId, name, quantity, refundAmount}`.
 `rated` says whether the customer has rated the order; once rated, `rating` is `{deliveryRating, restaurantRating, kiranaRating, comment, createdAt}` (stars 1-5, null for a part the order didn't have or wasn't rated).
@@ -326,15 +326,16 @@ Approved, online partners only. Offers reach the nearest free rider (H3 cells + 
 | GET | `/offers` | open offers `{items:[{offerId, orderIds, stops, totalDistanceMeters, estimatedEarnings, expiresAt}], …}` (also pushed as `OFFER`); `estimatedEarnings` includes the distance pay of the planned route | ✅ |
 | POST | `/offers/{id}/accept` | first accept wins; `409 OFFER_NO_LONGER_AVAILABLE` / `409 RIDER_BUSY`. Rider → `ACTIVE`, order → `PICKING`; returns the locked route | ✅ |
 | POST | `/offers/{id}/reject` `{reason?}` | 204; the order goes to the next rider straight away | ✅ |
-| GET | `/route` | `{routeId, locked:true, stops[{stopId, sequence, type, name, address, location, orderIds, items, state, eta}], remainingDistanceMeters, estimatedCompletionAt}`; `404` when no active route | ✅ |
+| GET | `/route` | `{routeId, locked:true, stops[{stopId, sequence, type, name, address, location{lat,lng}, orderIds, items, state, eta, contactPhone}], remainingDistanceMeters, estimatedCompletionAt, completedTrip}`; pickup stops list their `items` `{itemId, name, quantity, zone, deficient}`; `contactPhone` is set on `CUSTOMER` stops only (the address's recipient phone, else the customer's; real number for now); `completedTrip` is null except on `deliver`; `404` when no active route | ✅ |
 | POST | `/route/stops/{stopId}/arrived` | pickup step 1 (also used at the customer); tells the store `RIDER_ARRIVING` | ✅ |
 | POST | `/route/stops/{stopId}/deficient` `{itemIds:[…], reason?}` | pickup step 2, **Kirana only, optional**: mark missing items (stop item ids). Only after Arrived (`409 NOT_ARRIVED`) and before the scan (`409 STOP_ALREADY_COMPLETED`) | ✅ |
 | POST | `/route/stops/{stopId}/scan-qr` `{qrPayload}` | pickup step 3 at **every** store: the store's QR must match (`400 QR_WRONG_STORE` / `QR_INVALID` / `QR_EXPIRED` / `QR_REQUIRED`), needs Arrived (`409 NOT_ARRIVED`). Completes the stop. Kirana: the shop is settled for the available items only and the missing ones are refunded to the customer's wallet (nothing available → stop skipped, groceries `UNFULFILLED`: a grocery-only order is cancelled, a mixed one refunds the groceries' share). Restaurant: food picked up, restaurant settled | ✅ |
 | POST | `/route/stops/{stopId}/kirana-qr` · `/route/stops/{stopId}/picked-up` | aliases of `scan-qr` (same `{qrPayload}` body) | ✅ |
 | POST | `/route/stops/{stopId}/items/{itemId}/deficient` | alias of `deficient` for one item | ✅ |
-| POST | `/orders/{orderId}/deliver` `{deliveryOtp}` | 4-digit code from the customer; `400 DELIVERY_OTP_INVALID`. Completes the order, books earnings, frees the rider when the route is empty. Groceries not picked up by then become `UNFULFILLED` and are refunded (see mixed orders) | ✅ |
+| POST | `/orders/{orderId}/deliver` `{deliveryOtp}` | 4-digit code from the customer; `400 DELIVERY_OTP_INVALID`. Completes the order, books earnings, frees the rider when the route is empty. Returns the route (empty `stops` after the last drop) plus `completedTrip {orderId, breakdown}` for the trip summary (example below). Groceries not picked up by then become `UNFULFILLED` and are refunded (see mixed orders) | ✅ |
 | POST | `/route/injections/{id}/ack` | 204 | ✅ |
-| GET | `/deliveries?page&size` | `{orderId, batched, stops, earnings, completedAt}` | ✅ |
+| GET | `/deliveries?page&size` | `{orderId, batched, stops, earnings, completedAt, breakdown}` | ✅ |
+| GET | `/deliveries/{orderId}` | one delivered order of this rider with its `breakdown {basePay, multiStopBonus, batchBonus, distancePay, total}`; `404` otherwise | ✅ |
 | GET | `/earnings?period=TODAY/WEEK/MONTH&page&size` | Indian time; base ₹30 per order + ₹10 per extra pickup + batching incentives + `distancePay`, `tripCount`, today's `onlineMinutes` and paged `payouts` (example below) | ✅ |
 | GET | `/earnings/payouts?page&size` | | ✅ |
 
@@ -344,6 +345,13 @@ POST /api/v1/agent/route/stops/e2d4…/arrived
 POST /api/v1/agent/route/stops/e2d4…/deficient   {"itemIds": ["41b8…"], "reason": "Out of stock"}
 POST /api/v1/agent/route/stops/e2d4…/scan-qr     {"qrPayload": "HLQR1.0c5e….1791477000.Zm9v…"}
 → 200 the route, with stop e2d4… "state": "COMPLETED"
+```
+Last delivery of a trip:
+```json
+POST /api/v1/agent/orders/6f1c…/deliver   {"deliveryOtp": "4821"}
+→ 200 { "routeId": null, "locked": true, "stops": [], "remainingDistanceMeters": 0, "estimatedCompletionAt": null,
+        "completedTrip": { "orderId": "6f1c…",
+                           "breakdown": { "basePay": 30.00, "multiStopBonus": 10.00, "batchBonus": 0.00, "distancePay": 6.50, "total": 46.50 } } }
 ```
 Earnings (the merchant version has the same style):
 ```json
@@ -408,10 +416,10 @@ Required documents: restaurants `FSSAI_CERT, SHOP_PHOTO, OWNER_ID`; Kiranas `SHO
 | PUT | `/me/password` | `currentPassword, newPassword` | ✅ |
 | PUT | `/me/store-status` | `{open}`; approved stores only | ✅ |
 | GET | `/store-qr` | **every store** (Kirana and restaurant); signed payload `HLQR1.<merchantId>.<exp>.<sig>`, valid 15 min — show it as a QR and refresh before `expiresAt`. Response `{"qrPayload": "HLQR1.…", "expiresAt": "…"}` | ✅ |
-| GET | `/broadcasts` | Kirana only. Open rounds this shop was pinged for: `{items:[{broadcastId, orderId, items[{name, packSize, quantity}], payoutAmount, distanceMeters, expiresAt}], …}` (a handful at most, one page) | ✅ |
+| GET | `/broadcasts` | Kirana only. Open rounds this shop was pinged for: `{items:[{broadcastId, orderId, items[{name, packSize, quantity, itemId, zone}], payoutAmount, distanceMeters, expiresAt}], …}` (a handful at most, one page; `itemId` is the order line) | ✅ |
 | GET | `/earnings?period=TODAY/WEEK/MONTH&page&size` | same style as partner earnings: `{period, from, to, orderCount, total, payouts{items,page,size,totalItems}}`; `total` is what the store was settled for (one settlement per picked-up order) | ✅ |
 | POST | `/broadcasts/{id}/claim` ("Items in Hand") | Kirana only. First tap wins (atomic): `{broadcastId, orderId, claimed, message}`; late or un-targeted taps get `claimed:false` | ✅ |
-| GET | `/orders?status&page&size` | paginated. Restaurants see their kitchen tickets, Kiranas the orders they claimed: `{orderId, status, items, amount, prepDeadline, riderName, riderEta}` | ✅ |
+| GET | `/orders?status&page&size` | paginated, newest first. Restaurants see their kitchen tickets, Kiranas the orders they claimed: `{orderId, shortCode, status, items[{name, packSize, quantity, itemId, zone}], amount, prepDeadline, riderName, riderEta, customerNote, createdAt}`. `status` takes one value or a comma list (`?status=ACCEPTED,DELAYED`) | ✅ |
 | POST | `/orders/{id}/accept` `{prepMinutes 1-90}` | restaurant only; `NEW → ACCEPTED`, sets `prepDeadline` | ✅ |
 | POST | `/orders/{id}/delay` `{additionalMinutes 1-60, reason?}` | restaurant only; `→ DELAYED`, pushes `prepDeadline` back and holds back the Kirana broadcast | ✅ |
 | POST | `/orders/{id}/ready` | restaurant: food `ACCEPTED/DELAYED → READY`; Kirana: groceries `CLAIMED → READY` (its own claimed orders only, else `404`) | ✅ |
@@ -419,9 +427,10 @@ Required documents: restaurants `FSSAI_CERT, SHOP_PHOTO, OWNER_ID`; Kiranas `SHO
 | POST | `/items` | see body below → 201 | ✅ |
 | PUT | `/items/{id}` | same body as POST | ✅ |
 | PATCH | `/items/{id}/availability` | `{available}` | ✅ |
+| DELETE | `/items/{id}` | 204; removes it for good (and from customers' carts; orders keep their copy). Use availability to hide it for a while | ✅ |
 
 
-Merchant order `status`: `NEW, ACCEPTED, DELAYED, READY, PICKED_UP, CANCELLED` (`PREPARING` is accepted as a filter alias of `ACCEPTED`). A Kirana's claimed order shows as `ACCEPTED` until it calls `/ready`. Illegal moves return `409 ILLEGAL_STATE_TRANSITION`; a Kirana calling a restaurant-only endpoint gets `403 RESTAURANT_ONLY` (and vice versa `403 KIRANA_ONLY`).
+Merchant order `status`: `NEW, ACCEPTED, DELAYED, READY, PICKED_UP, CANCELLED`. As a filter, `PREPARING` = `ACCEPTED` + `DELAYED` (the "Preparing" tab, delayed tickets included). `shortCode` is the last 4 hex digits of the order id in upper case ("#A3F9"). A Kirana's claimed order shows as `ACCEPTED` until it calls `/ready`. Illegal moves return `409 ILLEGAL_STATE_TRANSITION`; a Kirana calling a restaurant-only endpoint gets `403 RESTAURANT_ONLY` (and vice versa `403 KIRANA_ONLY`).
 
 Item body: `name`, `description?`, `price` (> 0), `category`, `veg?`, `zone` (HOT/COLD/AMBIENT), `imageUrl?`, `available`, and for groceries `brand?`, `packSize?`, `mrp?`.
 The item's `itemType` follows the store: restaurants create `FOOD`, Kiranas create `GROCERY`. Grocery listings form the "virtual warehouse": customers see products listed by any Kirana within 2 km, and whichever nearby Kirana claims the order fulfils it.
@@ -526,6 +535,18 @@ Every message on every queue has the same shape; switch on `type`, read `data`:
             "updatedRoute": { "routeId": "…", "locked": true, "stops": [ … ], "remainingDistanceMeters": 1830, "estimatedCompletionAt": "…" } } }
 ```
 `ROUTE_UPDATED`: the route changed without the rider acting (late Kirana stop, cancelled order); `data` is the same as `GET /agent/route` (empty `stops` when the route is finished).
+```json
+{ "type": "ROUTE_UPDATED", "sentAt": "…",
+  "data": { "routeId": "5d2e…", "locked": true, "remainingDistanceMeters": 1830, "estimatedCompletionAt": "2026-10-08T13:52:00Z", "completedTrip": null,
+            "stops": [ { "stopId": "9a01…", "sequence": 1, "type": "RESTAURANT", "name": "Spice Hub", "address": "Spice Hub, Shivajinagar, Pune",
+                         "location": { "lat": 18.5248, "lng": 73.8524 }, "orderIds": ["6f1c…"],
+                         "items": [ { "itemId": "41b8…", "name": "Veg Biryani", "quantity": 1, "zone": "HOT", "deficient": false } ],
+                         "state": "PENDING", "eta": "2026-10-08T13:41:00Z", "contactPhone": null },
+                       { "stopId": "77bc…", "sequence": 2, "type": "CUSTOMER", "name": "Asha", "address": "Flat 12, …",
+                         "location": { "lat": 18.5204, "lng": 73.8567 }, "orderIds": ["6f1c…"], "items": [],
+                         "state": "PENDING", "eta": "2026-10-08T13:52:00Z", "contactPhone": "+919876543210" } ] } }
+```
+After a cancellation that empties the route: `{ "routeId": null, "locked": true, "stops": [], "remainingDistanceMeters": 0, "estimatedCompletionAt": null, "completedTrip": null }`.
 
 ### Merchant messages (`/user/queue/merchant-events`)
 All of these come from domain events after they commit; nothing is sent from a controller.
@@ -533,17 +554,20 @@ All of these come from domain events after they commit; nothing is sent from a c
 `NEW_ORDER` (restaurant): only once the order is `CONFIRMED` (payment held/captured, food status `NEW`), never at checkout while `PENDING`. `data` is the order card of `GET /merchant/orders`.
 ```json
 { "type": "NEW_ORDER", "sentAt": "…",
-  "data": { "orderId": "6f1c…", "status": "NEW", "items": [ { "name": "Veg Biryani", "packSize": null, "quantity": 1 } ],
-            "amount": 180.00, "prepDeadline": null, "riderName": null, "riderEta": null } }
+  "data": { "orderId": "6f1c…", "shortCode": "A3F9", "status": "NEW",
+            "items": [ { "name": "Veg Biryani", "packSize": null, "quantity": 1, "itemId": "41b8…", "zone": "HOT" } ],
+            "amount": 180.00, "prepDeadline": null, "riderName": null, "riderEta": null,
+            "customerNote": "Less spicy please", "createdAt": "2026-10-08T13:19:58Z" } }
 ```
-`ORDER_CANCELLED` (restaurant, and the Kirana if one claimed it):
+`ORDER_CANCELLED` (restaurant, and the Kirana if one claimed it). A Kirana also gets it when its claimed groceries are given up while the food goes on (`reason`: "The groceries for this order are no longer needed"):
 ```json
 { "type": "ORDER_CANCELLED", "sentAt": "…", "data": { "orderId": "6f1c…", "reason": "Changed my mind" } }
 ```
 `BROADCAST_OFFER` (Kirana): same object as an item of `GET /merchant/broadcasts`; hide it at `expiresAt`.
 ```json
 { "type": "BROADCAST_OFFER", "sentAt": "…",
-  "data": { "broadcastId": "b7a2…", "orderId": "6f1c…", "items": [ { "name": "Toned Milk", "packSize": "500 ml", "quantity": 2 } ],
+  "data": { "broadcastId": "b7a2…", "orderId": "6f1c…",
+            "items": [ { "name": "Toned Milk", "packSize": "500 ml", "quantity": 2, "itemId": "77d1…", "zone": "COLD" } ],
             "payoutAmount": 60.00, "distanceMeters": 210, "expiresAt": "2026-10-08T13:21:00Z" } }
 ```
 `BROADCAST_TAKEN` (every targeted Kirana except the winner): `reason` is `CLAIMED`, `EXPIRED` or `CANCELLED`.

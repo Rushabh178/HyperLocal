@@ -18,6 +18,7 @@ import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.OrderPickedUpNotice;
 import com.HyperLocalSystem.app.merchant.dto.MerchantDtos.RiderArrivingNotice;
 import com.HyperLocalSystem.app.merchant.service.MerchantService;
 import com.HyperLocalSystem.app.order.entity.UnifiedOrder;
+import com.HyperLocalSystem.app.order.event.OrderEvents.GroceriesUnfulfilledEvent;
 import com.HyperLocalSystem.app.order.event.OrderEvents.OrderCancelledEvent;
 import com.HyperLocalSystem.app.order.event.OrderEvents.OrderConfirmedEvent;
 import com.HyperLocalSystem.app.order.repository.UnifiedOrderRepository;
@@ -56,6 +57,16 @@ public class MerchantNotifications {
     }
 
     /** The restaurant and, if one claimed it, the Kirana. */
+    /** The groceries were given up (nothing there, or the drop happened without them): the Kirana that claimed them closes the card. */
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+    public void onGroceriesUnfulfilled(GroceriesUnfulfilledEvent event) {
+        orders.findById(event.orderId()).filter(order -> order.getKiranaId() != null).ifPresent(order ->
+                notifier.merchant(order.getKiranaId(), EventType.ORDER_CANCELLED,
+                        new OrderCancelledNotice(order.getId(), "The groceries for this order are no longer needed")));
+    }
+
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)

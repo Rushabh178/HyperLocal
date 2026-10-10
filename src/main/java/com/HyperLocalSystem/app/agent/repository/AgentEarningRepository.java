@@ -29,4 +29,12 @@ public interface AgentEarningRepository extends JpaRepository<AgentEarning, UUID
             group by e.orderId
             """)
     List<Object[]> totalsByOrder(@Param("agentId") UUID agentId, @Param("orderIds") Collection<UUID> orderIds);
+
+    /** {@code [orderId, type, sum]} for delivered orders: the per-trip breakdown. */
+    @Query("""
+            select e.orderId, e.type, sum(e.amount) from AgentEarning e
+            where e.agentId = :agentId and e.orderId in :orderIds
+            group by e.orderId, e.type
+            """)
+    List<Object[]> totalsByOrderAndType(@Param("agentId") UUID agentId, @Param("orderIds") Collection<UUID> orderIds);
 }

@@ -1,6 +1,8 @@
 package com.HyperLocalSystem.app.agent.service;
 
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.ActiveRouteResponse;
+import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.CompletedTrip;
+import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.TripBreakdown;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.DeliverRequest;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.DeliveryHistoryItem;
 import com.HyperLocalSystem.app.agent.dto.AgentTaskDtos.EarningsSummary;
@@ -269,7 +271,8 @@ public class AgentTaskService {
         bookEarnings(agentId, order);
         stops.flush();
         dispatch.completeRouteIfDone(agentId);
-        return routeResponse(agentId);
+        earnings.flush();
+        return routeResponse(agentId).withCompletedTrip(new CompletedTrip(orderId, breakdowns(agentId, List.of(orderId)).get(orderId)));
     }
 
     @Transactional
@@ -292,9 +295,44 @@ public class AgentTaskService {
         Map<UUID, Long> stopCounts = ids.isEmpty() ? Map.of() : stops.findByOrderIdIn(ids).stream()
                 .filter(s -> s.getState() == StopState.COMPLETED)
                 .collect(Collectors.groupingBy(RouteStop::getOrderId, Collectors.counting()));
+        Map<UUID, TripBreakdown> breakdowns = breakdowns(agentId, ids);
         return PageResponse.of(delivered, o -> new DeliveryHistoryItem(o.getId(), o.isBatched(),
                 stopCounts.getOrDefault(o.getId(), 0L).intValue(), paid.getOrDefault(o.getId(), BigDecimal.ZERO),
-                o.getCompletedAt()));
+                o.getCompletedAt(), breakdowns.get(o.getId())));
+    }
+
+    /** One delivered order of this rider, with its pay breakdown (the trip summary screen). */
+    @Transactional(readOnly = true)
+    public DeliveryHistoryItem delivery(UUID agentId, UUID orderId) {
+        UnifiedOrder order = orders.findById(orderId)
+                .filter(o -> agentId.equals(o.getDeliveryAgentId()) && o.getStatus() == OrderStatus.COMPLETED)
+                .orElseThrow(() -> ApiException.notFound("Delivery"));
+        TripBreakdown breakdown = breakdowns(agentId, List.of(orderId)).get(orderId);
+        int completedStops = (int) stops.findByOrderIdOrderBySequence(orderId).stream()
+                .filter(s -> s.getState() == StopState.COMPLETED).count();
+        return new DeliveryHistoryItem(orderId, order.isBatched(), completedStops, breakdown.total(), order.getCompletedAt(), breakdown);
+    }
+
+    /** Per-order pay by component; every requested order gets a breakdown (zeros when nothing was booked). */
+    private Map<UUID, TripBreakdown> breakdowns(UUID agentId, List<UUID> orderIds) {
+        Map<UUID, Map<AgentEarning.Type, BigDecimal>> byOrder = new java.util.HashMap<>();
+        if (!orderIds.isEmpty()) {
+            earnings.totalsByOrderAndType(agentId, orderIds).forEach(row -> byOrder
+                    .computeIfAbsent((UUID) row[0], id -> new EnumMap<>(AgentEarning.Type.class))
+                    .put((AgentEarning.Type) row[1], (BigDecimal) row[2]));
+        }
+        return orderIds.stream().collect(Collectors.toMap(id -> id, id -> {
+            Map<AgentEarning.Type, BigDecimal> amounts = byOrder.getOrDefault(id, Map.of());
+            BigDecimal base = money(amounts.get(AgentEarning.Type.BASE));
+            BigDecimal multiStop = money(amounts.get(AgentEarning.Type.MULTI_STOP_BONUS));
+            BigDecimal batch = money(amounts.get(AgentEarning.Type.BATCH_INCENTIVE));
+            BigDecimal distance = money(amounts.get(AgentEarning.Type.DISTANCE));
+            return new TripBreakdown(base, multiStop, batch, distance, base.add(multiStop).add(batch).add(distance));
+        }, (a, b) -> a));
+    }
+
+    private static BigDecimal money(BigDecimal amount) {
+        return (amount == null ? BigDecimal.ZERO : amount).setScale(2, java.math.RoundingMode.HALF_UP);
     }
 
     /** Totals for today / this week (from Monday) / this month in Indian time, today's online minutes, payouts. */

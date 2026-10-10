@@ -150,6 +150,10 @@ public class UnifiedOrder {
     @Column(name = "prep_ready_at")
     private Instant prepReadyAt;
 
+    /** The customer's note for the stores, from checkout. */
+    @Column(name = "customer_note", length = 250)
+    private String customerNote;
+
     @Column(name = "cancel_reason", length = 250)
     private String cancelReason;
 

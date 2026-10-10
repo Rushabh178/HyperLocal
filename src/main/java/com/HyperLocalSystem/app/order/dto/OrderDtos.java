@@ -29,7 +29,9 @@ public final class OrderDtos {
     /** Converts the current cart into one order. Send an {@code Idempotency-Key} header to make retries safe. */
     public record CheckoutRequest(
             @NotNull UUID addressId,
-            @NotNull PaymentMethod paymentMethod) {
+            @NotNull PaymentMethod paymentMethod,
+            /** Optional note for the stores ("less spicy", "ring the bell"), shown on their order card. */
+            @Size(max = 250) String note) {
     }
 
     /**
@@ -79,6 +81,7 @@ public final class OrderDtos {
             List<TrackingStop> stops,
             boolean rated,
             OrderRatingResponse rating,
+            String note,
             Instant createdAt) {
     }
 

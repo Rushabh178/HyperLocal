@@ -12,7 +12,9 @@ import com.HyperLocalSystem.app.common.geo.GeoUtils;
 import com.HyperLocalSystem.app.common.model.StopState;
 import com.HyperLocalSystem.app.common.model.StopType;
 import com.HyperLocalSystem.app.config.AppProperties;
+import com.HyperLocalSystem.app.customer.entity.Customer;
 import com.HyperLocalSystem.app.customer.repository.CustomerAddressRepository;
+import com.HyperLocalSystem.app.customer.repository.CustomerRepository;
 import com.HyperLocalSystem.app.customer.service.CustomerAddressService;
 import com.HyperLocalSystem.app.dispatch.entity.RiderRoute;
 import com.HyperLocalSystem.app.dispatch.entity.RouteStop;
@@ -48,6 +50,7 @@ public class RoutePlanner {
 
     private final MerchantRepository merchants;
     private final CustomerAddressRepository addresses;
+    private final CustomerRepository customers;
     private final OrderItemRepository orderItems;
     private final UnifiedOrderRepository orders;
     private final DeliveryAgentRepository agents;
@@ -140,9 +143,12 @@ public class RoutePlanner {
             remainingMeters = routingClient.route(path).distanceMeters();
         }
         Instant completion = remaining.isEmpty() ? null : remaining.getLast().getEta();
+        Map<UUID, String> phones = contactPhones(ordered.stream().filter(s -> s.getType() == StopType.CUSTOMER && !s.isDone())
+                .map(RouteStop::getOrderId).distinct().toList());
         return new ActiveRouteResponse(route.getId(), true,
-                ordered.stream().map(stop -> toDto(stop, items.getOrDefault(stop.getOrderId(), List.of()))).toList(),
-                remainingMeters, completion);
+                ordered.stream().map(stop -> toDto(stop, items.getOrDefault(stop.getOrderId(), List.of()),
+                        stop.getType() == StopType.CUSTOMER ? phones.get(stop.getOrderId()) : null)).toList(),
+                remainingMeters, completion, null);
     }
 
     /** The offer card: where the rider would go and roughly what they'd earn. */
@@ -152,7 +158,7 @@ public class RoutePlanner {
         List<RouteStop> stops = stopsFor(order, preview, 1);
         Map<UUID, List<OrderItem>> items = itemsByOrder(List.of(order.getId()));
         return new AgentTaskDtos.TaskOffer(offer.getId(), List.of(order.getId()),
-                stops.stream().map(stop -> toDto(stop, items.getOrDefault(order.getId(), List.of()))).toList(),
+                stops.stream().map(stop -> toDto(stop, items.getOrDefault(order.getId(), List.of()), null)).toList(),
                 offer.getDistanceMeters(), offer.getEstimatedEarnings(), offer.getExpiresAt());
     }
 
@@ -180,7 +186,29 @@ public class RoutePlanner {
         return agents.findById(agentId).map(DeliveryAgent::getCurrentLocation).map(GeoUtils::fromPoint);
     }
 
-    private AgentTaskDtos.RouteStop toDto(RouteStop stop, List<OrderItem> orderLines) {
+    /**
+     * Who the rider calls at the door: the address's recipient if one was given, else the customer.
+     * TODO(edge-case): mask the number / route calls through a masking provider.
+     */
+    private Map<UUID, String> contactPhones(Collection<UUID> orderIds) {
+        if (orderIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, String> phones = new java.util.HashMap<>();
+        for (UnifiedOrder order : orders.findAllById(orderIds)) {
+            String phone = order.getDeliveryAddressId() == null ? null
+                    : addresses.findById(order.getDeliveryAddressId()).map(a -> a.getRecipientPhone()).orElse(null);
+            if (phone == null) {
+                phone = customers.findById(order.getCustomerId()).map(Customer::getPhone).orElse(null);
+            }
+            if (phone != null) {
+                phones.put(order.getId(), phone);
+            }
+        }
+        return phones;
+    }
+
+    private AgentTaskDtos.RouteStop toDto(RouteStop stop, List<OrderItem> orderLines, String contactPhone) {
         ItemType wanted = switch (stop.getType()) {
             case KIRANA, DARK_STORE -> ItemType.GROCERY;
             case RESTAURANT -> ItemType.FOOD;
@@ -191,7 +219,8 @@ public class RoutePlanner {
                 .map(line -> new StopItem(line.getId(), line.getName(), line.getQuantity(), line.getZone(), line.isDeficient()))
                 .toList();
         return new AgentTaskDtos.RouteStop(stop.getId(), stop.getSequence(), stop.getType(), stop.getName(), stop.getAddress(),
-                GeoUtils.fromPoint(stop.getLocation()), List.of(stop.getOrderId()), stopItems, stop.getState(), stop.getEta());
+                GeoUtils.fromPoint(stop.getLocation()), List.of(stop.getOrderId()), stopItems, stop.getState(), stop.getEta(),
+                contactPhone);
     }
 
     private Map<UUID, List<OrderItem>> itemsByOrder(Collection<UUID> orderIds) {
@@ -204,7 +233,7 @@ public class RoutePlanner {
 
     /** What a rider without an active route sees. */
     public static ActiveRouteResponse emptyRoute() {
-        return new ActiveRouteResponse(null, true, List.of(), 0, null);
+        return new ActiveRouteResponse(null, true, List.of(), 0, null, null);
     }
 
     /** Marks every unfinished stop of an order SKIPPED (cancellation, nothing left to pick up). */

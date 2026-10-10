@@ -2,6 +2,7 @@ package com.HyperLocalSystem.app.merchant.service;
 
 import com.HyperLocalSystem.app.agent.entity.DeliveryAgent;
 import com.HyperLocalSystem.app.agent.repository.DeliveryAgentRepository;
+import com.HyperLocalSystem.app.cart.repository.CartItemRepository;
 import com.HyperLocalSystem.app.catalog.entity.CatalogItem;
 import com.HyperLocalSystem.app.catalog.entity.ItemType;
 import com.HyperLocalSystem.app.catalog.repository.CatalogItemRepository;
@@ -56,6 +57,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -70,6 +72,7 @@ public class MerchantService {
 
     private final MerchantRepository merchants;
     private final CatalogItemRepository catalogItems;
+    private final CartItemRepository cartItems;
     private final UnifiedOrderRepository orders;
     private final OrderItemRepository orderItems;
     private final DeliveryAgentRepository agents;
@@ -180,12 +183,18 @@ public class MerchantService {
 
     // ---- orders (both types) ----
 
-    /** Restaurants see their kitchen tickets, Kiranas the orders they claimed. Newest first. */
+    /**
+     * Restaurants see their kitchen tickets, Kiranas the orders they claimed. Newest first. {@code status}
+     * may hold several statuses (any of them matches); empty = every visible order.
+     */
     @Transactional(readOnly = true)
-    public PageResponse<MerchantOrder> orders(UUID merchantId, MerchantOrderStatus status, int page, int size) {
+    public PageResponse<MerchantOrder> orders(UUID merchantId, List<MerchantOrderStatus> status, int page, int size) {
         Merchant merchant = load(merchantId);
         Pageable pageable = PageResponse.request(page, size);
-        Set<PartStatus> statuses = status == null ? VISIBLE : partStatuses(status);
+        Set<PartStatus> statuses = status == null || status.isEmpty() ? VISIBLE : EnumSet.noneOf(PartStatus.class);
+        if (status != null) {
+            status.forEach(s -> statuses.addAll(partStatuses(s)));
+        }
         Page<UnifiedOrder> result = merchant.getType() == MerchantType.RESTAURANT
                 ? orders.findByRestaurantIdAndFoodStatusInOrderByCreatedAtDesc(merchantId, statuses, pageable)
                 : orders.findByKiranaIdAndGroceryStatusInOrderByCreatedAtDesc(merchantId, statuses, pageable);
@@ -243,7 +252,8 @@ public class MerchantService {
         Instant riderEta = order.getDeliveryAgentId() == null ? null
                 : routeStops.findFirstByOrderIdAndMerchantId(order.getId(), merchantId).map(RouteStop::getEta).orElse(null);
         return new MerchantOrder(order.getId(), merchantStatus(part), toBroadcastItems(items), amount,
-                order.getPrepReadyAt(), riderName, riderEta);
+                order.getPrepReadyAt(), riderName, riderEta, order.getCustomerNote(), order.getCreatedAt(),
+                MerchantOrder.shortCode(order.getId()));
     }
 
     private Map<UUID, List<OrderItem>> itemsByOrder(List<UUID> orderIds, ItemType type) {
@@ -256,17 +266,18 @@ public class MerchantService {
     }
 
     private static List<BroadcastItem> toBroadcastItems(List<OrderItem> items) {
-        return items.stream().map(i -> new BroadcastItem(i.getName(), i.getPackSize(), i.getQuantity())).toList();
+        return items.stream().map(i -> new BroadcastItem(i.getName(), i.getPackSize(), i.getQuantity(), i.getId(), i.getZone())).toList();
     }
 
     /** Merchants never see orders still awaiting payment or groceries still being broadcast. */
-    private static final Set<PartStatus> VISIBLE = EnumSet.of(PartStatus.NEW, PartStatus.ACCEPTED, PartStatus.CLAIMED, PartStatus.DELAYED,
-            PartStatus.READY, PartStatus.PICKED_UP, PartStatus.UNFULFILLED, PartStatus.CANCELLED);
+    private static final Set<PartStatus> VISIBLE = Collections.unmodifiableSet(EnumSet.of(PartStatus.NEW, PartStatus.ACCEPTED, PartStatus.CLAIMED, PartStatus.DELAYED,
+            PartStatus.READY, PartStatus.PICKED_UP, PartStatus.UNFULFILLED, PartStatus.CANCELLED));
 
     private static Set<PartStatus> partStatuses(MerchantOrderStatus status) {
         return switch (status) {
             case NEW -> EnumSet.of(PartStatus.NEW);
-            case ACCEPTED, PREPARING -> EnumSet.of(PartStatus.ACCEPTED, PartStatus.CLAIMED);
+            case ACCEPTED -> EnumSet.of(PartStatus.ACCEPTED, PartStatus.CLAIMED);
+            case PREPARING -> EnumSet.of(PartStatus.ACCEPTED, PartStatus.DELAYED, PartStatus.CLAIMED);
             case DELAYED -> EnumSet.of(PartStatus.DELAYED);
             case READY -> EnumSet.of(PartStatus.READY);
             case PICKED_UP -> EnumSet.of(PartStatus.PICKED_UP);
@@ -332,6 +343,17 @@ public class MerchantService {
         CatalogItem item = loadItem(merchantId, itemId);
         item.setAvailable(available);
         return toItemResponse(item);
+    }
+
+    /**
+     * Removes the item from the menu / shelf for good (orders keep their own copy of name and price) and from
+     * customers' carts. To hide it for a while, use the availability toggle instead.
+     */
+    @Transactional
+    public void deleteItem(UUID merchantId, UUID itemId) {
+        CatalogItem item = loadItem(merchantId, itemId);
+        cartItems.deleteByItemId(itemId);
+        catalogItems.delete(item);
     }
 
     private static void apply(CatalogItem item, CatalogItemRequest request) {
