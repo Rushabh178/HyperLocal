@@ -49,7 +49,7 @@ public abstract class IntegrationTest {
     @Autowired
     protected CapturingPushSender pushes;
 
-    /** A random point in India, far enough from other test classes' points to never be within 2 km. */
+    /** A random point in India, almost surely farther than the 6 km restaurant radius from other test classes. */
     protected final double baseLat = 10 + ThreadLocalRandom.current().nextDouble() * 15;
     protected final double baseLng = 73 + ThreadLocalRandom.current().nextDouble() * 10;
 

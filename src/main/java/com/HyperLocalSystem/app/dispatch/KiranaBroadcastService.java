@@ -4,6 +4,7 @@ import com.HyperLocalSystem.app.common.exception.ApiException;
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
 import com.HyperLocalSystem.app.common.geo.GeoUtils;
 import com.HyperLocalSystem.app.config.AppProperties;
+import com.HyperLocalSystem.app.delivery.DeliveryPricing;
 import com.HyperLocalSystem.app.dispatch.DispatchEvents.BroadcastCloseReason;
 import com.HyperLocalSystem.app.dispatch.DispatchEvents.BroadcastClosedEvent;
 import com.HyperLocalSystem.app.dispatch.DispatchEvents.BroadcastOpenedEvent;
@@ -52,6 +53,7 @@ public class KiranaBroadcastService {
     private final SpatialIndexService spatialIndex;
     private final UnfulfilledGroceries unfulfilledGroceries;
     private final AppProperties properties;
+    private final DeliveryPricing pricing;
     private final ApplicationEventPublisher events;
 
     /** Creates a round that opens at {@code startsAt}; opened right away when that is already due. */
@@ -104,15 +106,17 @@ public class KiranaBroadcastService {
 
     /**
      * Pings the {@code ops.kiranaBroadcastFanout} (5) nearest open Kiranas not pinged in earlier
-     * rounds, within this round's radius (500 m, then 1 km, ...: the H3 disk widens with it).
-     * Returns false when nobody is in range.
+     * rounds, within this round's radius (500 m, then 1 km, ...: the H3 disk widens with it) and never
+     * farther than {@code kirana-radius-km} (2 km) from the customer. Returns false when nobody is in range.
      */
     private boolean open(BroadcastOffer offer) {
         AppProperties.Ops ops = properties.ops();
         int radius = radiusForRound(offer.getRound());
+        GeoPoint drop = orders.findById(offer.getOrderId()).map(o -> GeoUtils.fromPoint(o.getDropLocation())).orElseThrow();
         List<NearbyMerchant> kiranas = targets.findNextKiranas(
                 spatialIndex.cellsWithin(offer.getOriginLat(), offer.getOriginLng(), radius), MerchantType.KIRANA.name(),
-                offer.getOriginLat(), offer.getOriginLng(), radius, offer.getOrderId(), ops.kiranaBroadcastFanout());
+                offer.getOriginLat(), offer.getOriginLng(), radius, drop.lat(), drop.lng(), pricing.radiusMeters(MerchantType.KIRANA),
+                offer.getOrderId(), ops.kiranaBroadcastFanout());
         log.info("Broadcast round {} for order {}: {} Kiranas within {} m", offer.getRound(), offer.getOrderId(), kiranas.size(), radius);
         if (kiranas.isEmpty()) {
             return false;
@@ -177,17 +181,23 @@ public class KiranaBroadcastService {
     }
 
     int radiusForRound(int round) {
-        AppProperties.Ops ops = properties.ops();
-        return Math.min(ops.kiranaBroadcastRadiusMeters() * round, ops.serviceRadiusMeters());
+        return Math.min(properties.ops().kiranaBroadcastRadiusMeters() * round, pricing.radiusMeters(MerchantType.KIRANA));
     }
 
-    /** Combined orders: near the restaurant (the rider passes by). Grocery-only: near the customer. */
+    /**
+     * Combined orders: near the restaurant (the rider passes by), if the restaurant is within the Kirana
+     * radius of the customer. Grocery-only orders and far restaurants: near the customer.
+     */
     private GeoPoint origin(UnifiedOrder order) {
+        GeoPoint drop = GeoUtils.fromPoint(order.getDropLocation());
         if (order.getRestaurantId() != null) {
-            return merchants.findById(order.getRestaurantId())
-                    .map(restaurant -> GeoUtils.fromPoint(restaurant.getLocation()))
+            GeoPoint restaurant = merchants.findById(order.getRestaurantId())
+                    .map(r -> GeoUtils.fromPoint(r.getLocation()))
                     .orElseThrow(() -> ApiException.notFound("Restaurant"));
+            if (GeoUtils.haversineMeters(restaurant, drop) <= pricing.radiusMeters(MerchantType.KIRANA)) {
+                return restaurant;
+            }
         }
-        return GeoUtils.fromPoint(order.getDropLocation());
+        return drop;
     }
 }

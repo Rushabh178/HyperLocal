@@ -46,6 +46,17 @@ public class HaversineRoutingClient implements RoutingClient {
         return seconds;
     }
 
+    @Override
+    public int[][] distanceMatrix(List<GeoPoint> sources, List<GeoPoint> destinations) {
+        int[][] meters = new int[sources.size()][destinations.size()];
+        for (int i = 0; i < sources.size(); i++) {
+            for (int j = 0; j < destinations.size(); j++) {
+                meters[i][j] = (int) Math.round(roadMeters(sources.get(i), destinations.get(j)));
+            }
+        }
+        return meters;
+    }
+
     private double roadMeters(GeoPoint a, GeoPoint b) {
         return GeoUtils.haversineMeters(a, b) * detourFactor;
     }

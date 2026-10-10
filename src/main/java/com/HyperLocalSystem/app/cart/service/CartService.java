@@ -22,6 +22,7 @@ import com.HyperLocalSystem.app.common.model.AccountStatus;
 import com.HyperLocalSystem.app.config.AppProperties;
 import com.HyperLocalSystem.app.customer.entity.CustomerAddress;
 import com.HyperLocalSystem.app.customer.repository.CustomerAddressRepository;
+import com.HyperLocalSystem.app.delivery.DeliveryPricing;
 import com.HyperLocalSystem.app.merchant.entity.ApprovalStatus;
 import com.HyperLocalSystem.app.merchant.entity.Merchant;
 import com.HyperLocalSystem.app.merchant.entity.MerchantType;
@@ -55,10 +56,12 @@ public class CartService {
     private final CustomerAddressRepository addresses;
     private final CatalogService catalogService;
     private final BillCalculator billCalculator;
+    private final DeliveryPricing pricing;
     private final AppProperties properties;
 
     /** A priced snapshot of the cart, also used by checkout. */
-    public record PricedCart(Cart cart, List<PricedLine> food, List<PricedLine> groceries, BillSummary bill) {
+    /** {@code roadKm}: the distance the delivery fee was priced on, null when unknown. */
+    public record PricedCart(Cart cart, List<PricedLine> food, List<PricedLine> groceries, BillSummary bill, Double roadKm) {
 
         public boolean isEmpty() {
             return food.isEmpty() && groceries.isEmpty();
@@ -74,7 +77,7 @@ public class CartService {
 
     @Transactional(readOnly = true)
     public CartResponse get(UUID customerId) {
-        return carts.findByCustomerId(customerId).map(cart -> toResponse(customerId, price(cart)))
+        return carts.findByCustomerId(customerId).map(cart -> toResponse(customerId, priceAt(customerId, cart)))
                 .orElseGet(() -> toResponse(customerId, null));
     }
 
@@ -115,7 +118,7 @@ public class CartService {
         line.setQuantity(Math.min(line.getQuantity() + request.quantity(), MAX_QUANTITY));
         cartItems.save(line);
         carts.save(cart);
-        return toResponse(customerId, price(cart));
+        return toResponse(customerId, priceAt(customerId, cart));
     }
 
     /** Quantity 0 removes the line. */
@@ -128,7 +131,7 @@ public class CartService {
             return removeItem(customerId, cartItemId);
         }
         line.setQuantity(request.quantity());
-        return toResponse(customerId, price(cart));
+        return toResponse(customerId, priceAt(customerId, cart));
     }
 
     @Transactional
@@ -138,7 +141,7 @@ public class CartService {
                 .orElseThrow(() -> ApiException.notFound("Cart item"));
         cartItems.delete(line);
         cartItems.flush();
-        PricedCart priced = price(cart);
+        PricedCart priced = priceAt(customerId, cart);
         if (priced.food().isEmpty()) {
             cart.setRestaurantId(null);
         }
@@ -153,13 +156,13 @@ public class CartService {
         });
     }
 
-    /** The address must be the customer's and within 2 km of the restaurant / of an open Kirana. */
+    /** The address must be the customer's and in range of the restaurant (6 km) and of an open Kirana (2 km). */
     @Transactional
     public CartResponse selectAddress(UUID customerId, UUID addressId) {
         Cart cart = carts.findByCustomerId(customerId).orElseGet(() -> newCart(customerId));
         CustomerAddress address = addresses.findByIdAndCustomerIdAndDeletedFalse(addressId, customerId)
                 .orElseThrow(() -> ApiException.notFound("Address"));
-        PricedCart priced = price(cart);
+        PricedCart priced = price(cart, address);
         ensureServiceable(priced, address);
         cart.setDeliveryAddressId(address.getId());
         return toResponse(customerId, priced);
@@ -168,37 +171,47 @@ public class CartService {
     @Transactional(readOnly = true)
     public CartNudge nudge(UUID customerId) {
         Optional<Cart> cart = carts.findByCustomerId(customerId);
-        CartNudge nudge = cart.map(c -> buildNudge(customerId, price(c))).orElse(null);
+        CartNudge nudge = cart.map(c -> buildNudge(customerId, priceAt(customerId, c))).orElse(null);
         return nudge != null ? nudge
                 : new CartNudge(BigDecimal.ZERO, properties.ops().groceryCartNudgeThreshold(), null, List.of());
     }
 
     // ----------------------------------------------------------------- used by checkout
 
-    /** Locks the cart row for the rest of the checkout transaction, then prices it. */
+    /** Locks the cart row for the rest of the checkout transaction, then prices it for delivery to {@code address}. */
     @Transactional
-    public PricedCart lockAndPrice(UUID customerId) {
+    public PricedCart lockAndPrice(UUID customerId, CustomerAddress address) {
         return price(carts.lockByCustomerId(customerId)
-                .orElseThrow(() -> ApiException.badRequest("CART_EMPTY", "Your cart is empty")));
+                .orElseThrow(() -> ApiException.badRequest("CART_EMPTY", "Your cart is empty")), address);
     }
 
-    /** Rejects addresses outside the 2 km radius of the cart's stores. */
+    /**
+     * Straight-line range check per part, saying which part can't come: the restaurant must be within
+     * {@code app.delivery.restaurant-radius-km} (6 km) and an open Kirana within {@code kirana-radius-km} (2 km).
+     */
     public void ensureServiceable(PricedCart priced, CustomerAddress address) {
-        int radius = properties.ops().serviceRadiusMeters();
-        if (priced.cart().getRestaurantId() != null) {
+        boolean hasFood = priced.cart().getRestaurantId() != null && !priced.food().isEmpty();
+        if (hasFood) {
+            int radius = pricing.radiusMeters(MerchantType.RESTAURANT);
             Merchant restaurant = merchants.findById(priced.cart().getRestaurantId())
                     .orElseThrow(() -> ApiException.notFound("Restaurant"));
             double meters = GeoUtils.haversineMeters(GeoUtils.fromPoint(restaurant.getLocation()),
                     GeoUtils.fromPoint(address.getLocation()));
             if (meters > radius) {
-                throw ApiException.badRequest("ADDRESS_NOT_SERVICEABLE",
-                        restaurant.getStoreName() + " doesn't deliver to this address (over " + radius / 1000 + " km away)");
+                throw ApiException.badRequest("ADDRESS_NOT_SERVICEABLE", "Food from " + restaurant.getStoreName()
+                        + " can't be delivered to this address: it's more than " + km(radius) + " km away"
+                        + (priced.groceries().isEmpty() ? "." : ". Your groceries can."));
             }
         }
         if (!priced.groceries().isEmpty() && catalogService.openNearby(MerchantType.KIRANA,
                 address.getLocation().getY(), address.getLocation().getX()).isEmpty()) {
-            throw ApiException.badRequest("ADDRESS_NOT_SERVICEABLE", "No grocery store is open near this address");
+            throw ApiException.badRequest("ADDRESS_NOT_SERVICEABLE", "Groceries can't be delivered to this address: no grocery store is open within "
+                    + km(pricing.radiusMeters(MerchantType.KIRANA)) + " km" + (hasFood ? ". Your food can." : "."));
         }
+    }
+
+    private static String km(int meters) {
+        return meters % 1000 == 0 ? Integer.toString(meters / 1000) : Double.toString(meters / 1000.0);
     }
 
     // ----------------------------------------------------------------- helpers
@@ -214,7 +227,17 @@ public class CartService {
         return carts.findByCustomerId(customerId).orElseThrow(() -> ApiException.notFound("Cart"));
     }
 
-    private PricedCart price(Cart cart) {
+    /** Prices the cart for its delivery pin (the chosen address, else the default one), if there is one. */
+    private PricedCart priceAt(UUID customerId, Cart cart) {
+        return price(cart, deliveryPin(customerId, cart).orElse(null));
+    }
+
+    /**
+     * Prices the cart. The delivery fee depends on the road distance of the farthest pickup: the restaurant.
+     * Groceries come from a Kirana within {@code kirana-radius-km}, which is inside the free-delivery zone.
+     * TODO(edge-case): if kirana-radius-km is ever raised above free-delivery-km, price the grocery pickup too.
+     */
+    private PricedCart price(Cart cart, CustomerAddress pin) {
         List<CartItem> lines = cartItems.findByCartIdOrderByCreatedAt(cart.getId());
         Map<UUID, CatalogItem> byId = catalogItems.findAllById(lines.stream().map(CartItem::getItemId).toList())
                 .stream().collect(Collectors.toMap(CatalogItem::getId, Function.identity()));
@@ -225,14 +248,23 @@ public class CartService {
                 .toList();
         List<PricedLine> food = priced.stream().filter(p -> p.line().getType() == ItemType.FOOD).toList();
         List<PricedLine> groceries = priced.stream().filter(p -> p.line().getType() == ItemType.GROCERY).toList();
-        return new PricedCart(cart, food, groceries, billCalculator.bill(sum(food), sum(groceries)));
+        Double roadKm = null;
+        if (!food.isEmpty() && cart.getRestaurantId() != null && pin != null) {
+            roadKm = merchants.findById(cart.getRestaurantId())
+                    .map(restaurant -> pricing.roadKm(GeoUtils.fromPoint(restaurant.getLocation()), GeoUtils.fromPoint(pin.getLocation())))
+                    .orElse(null);
+        }
+        return new PricedCart(cart, food, groceries, billCalculator.bill(sum(food), sum(groceries), roadKm), roadKm);
     }
 
     private static BigDecimal sum(List<PricedLine> lines) {
         return lines.stream().map(PricedLine::lineTotal).reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
-    /** Grocery-only cart under ₹150: suggest the priciest dishes from open restaurants near the delivery pin. */
+    /**
+     * Grocery-only cart under ₹150: suggest the priciest dishes from open restaurants within
+     * {@code meal-nudge-radius-km} (2 km) of the delivery pin, so adding one keeps delivery free.
+     */
     private CartNudge buildNudge(UUID customerId, PricedCart priced) {
         BigDecimal threshold = properties.ops().groceryCartNudgeThreshold();
         BigDecimal groceryTotal = priced.bill().grocerySubtotal();
@@ -241,7 +273,7 @@ public class CartService {
         }
         List<SuggestedMeal> meals = deliveryPin(customerId, priced.cart())
                 .map(address -> catalogService.openNearby(MerchantType.RESTAURANT,
-                        address.getLocation().getY(), address.getLocation().getX()))
+                        address.getLocation().getY(), address.getLocation().getX(), pricing.mealNudgeRadiusMeters()))
                 .filter(ids -> !ids.isEmpty())
                 .map(ids -> catalogItems.findTop5ByMerchantIdInAndTypeAndAvailableTrueOrderByPriceDesc(ids, ItemType.FOOD)
                         .stream().map(this::toSuggestedMeal).toList())
@@ -266,11 +298,12 @@ public class CartService {
 
     private CartResponse toResponse(UUID customerId, PricedCart priced) {
         if (priced == null) {
-            return new CartResponse(null, List.of(), List.of(), null, billCalculator.bill(BigDecimal.ZERO, BigDecimal.ZERO), null);
+            return new CartResponse(null, List.of(), List.of(), null, billCalculator.bill(BigDecimal.ZERO, BigDecimal.ZERO, null), null,
+                    null, pricing.freeDeliveryKm());
         }
         return new CartResponse(priced.cart().getRestaurantId(), priced.food().stream().map(CartService::toLine).toList(),
                 priced.groceries().stream().map(CartService::toLine).toList(), priced.cart().getDeliveryAddressId(),
-                priced.bill(), buildNudge(customerId, priced));
+                priced.bill(), buildNudge(customerId, priced), priced.roadKm(), pricing.freeDeliveryKm());
     }
 
     private static CartItemResponse toLine(PricedLine p) {

@@ -79,12 +79,19 @@ public final class CartDtos {
             List<SuggestedMeal> suggestedMeals) {
     }
 
+    /**
+     * {@code deliveryDistanceKm}: road km from the restaurant to the delivery address (the cart's address, else the
+     * default one) that the delivery fee is based on; null when there is no food or no address yet.
+     * {@code freeDeliveryKm}: delivery is free up to this distance.
+     */
     public record CartResponse(
             UUID restaurantId,
             List<CartItemResponse> foodItems,
             List<CartItemResponse> groceryItems,
             UUID deliveryAddressId,
             BillSummary bill,
-            CartNudge nudge) {
+            CartNudge nudge,
+            Double deliveryDistanceKm,
+            double freeDeliveryKm) {
     }
 }

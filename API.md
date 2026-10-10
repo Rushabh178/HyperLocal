@@ -143,25 +143,43 @@ Ops approves partners and stores through the admin endpoints below.
 | PUT | `/{id}` | same body as POST | ✅ |
 | PUT | `/{id}/default` | | ✅ |
 | DELETE | `/{id}` | soft delete; the next address is promoted to default | ✅ |
-| POST | `/serviceability` | `{lat,lng}` → `{serviceable, serviceRadiusMeters, nearbyRestaurants, nearbyKiranaStores, message}`; counts approved stores within 2 km | ✅ |
+| POST | `/serviceability` | `{lat,lng}` → `{serviceable, serviceRadiusMeters, nearbyRestaurants, nearbyKiranaStores, message, restaurantRadiusMeters, kiranaRadiusMeters}`; counts approved restaurants within 6 km and Kiranas within 2 km (`serviceRadiusMeters` = the wider one, 6000) | ✅ |
 
 Address body: `label` (HOME/WORK/OTHER), `customLabel?`, `recipientName?`, `recipientPhone?`, `houseNumber`, `buildingName?`, `street?`, `landmark?`, `area?`, `city`, `state`, `pincode`, `location {lat,lng}`, `deliveryInstructions?`, `makeDefault?`. The server stores a PostGIS point plus its H3 cell.
 
+### Delivery range and fee
+Distances are measured from the customer's **selected delivery address** to the store (`app.delivery.*`):
+- **Visibility** uses the straight line (H3 cells first, then PostGIS): restaurants within **6 km** (`restaurant-radius-km`), Kiranas within **2 km** (`kirana-radius-km`). Groceries (catalogue, broadcast targets) always come from Kiranas within 2 km of the customer.
+- **The fee** uses the **road distance** (`RoutingClient`; by default straight line × 1.3) of the order's farthest pickup, which is the restaurant (Kiranas are always inside the free zone). It is shown as `distanceKm` (one decimal) next to `deliveryFee`.
+
+| Road distance | Delivery fee |
+|---|---|
+| up to 2 km (`free-delivery-km`) | free; but a grocery-only cart under ₹150 pays ₹25 unless it adds a meal (the meal nudge) |
+| 2–3 km · 3–4 km · 4–5 km · 5–6 km (`fee-slabs`) | ₹15 · ₹25 · ₹35 · ₹45, whatever the cart holds (no waiver) |
+| over 6 km by road (store still within 6 km straight line) | ₹45, the last slab (`TODO(edge-case)`) |
+
+So the restaurant cards and the menu can say "Free delivery" (`deliveryFee: 0.00`) or "₹25 delivery". The cart and checkout recompute the fee for the chosen address; checkout stores the distance with the order.
+
 ### Catalog: `/catalog` (public GET)
-Pass the selected address's pin as `lat`/`lng`. Everything is limited to approved stores within 2 km (`app.ops.service-radius-meters`).
+Pass the selected address's pin as `lat`/`lng`. Restaurants are limited to approved stores within 6 km, groceries to Kiranas within 2 km (see above).
 | Method | Path | Notes | Status |
 |---|---|---|---|
-| GET | `/restaurants?lat&lng&cuisine&page&size` | open restaurants first, then nearest; closed ones have `open:false`; `etaMinutes` = default prep (15) + travel time; `rating` is null until rated | ✅ |
-| GET | `/restaurants/{id}/menu?lat&lng` | grouped by category; sold-out dishes have `available:false`. Header: `isOpen` (same as `open`), `rating` (null until rated), `ratingCount`, and with the customer's pin `distanceKm` + `etaMinutes` (null without `lat`/`lng`). Example below | ✅ |
+| GET | `/restaurants?lat&lng&cuisine&page&size` | open restaurants first, then nearest; closed ones have `open:false`; `etaMinutes` = default prep (15) + travel time; `rating` is null until rated; `distanceMeters` (straight line), `distanceKm` (road) and `deliveryFee` (example below) | ✅ |
+| GET | `/restaurants/{id}/menu?lat&lng` | grouped by category; sold-out dishes have `available:false`. Header: `isOpen` (same as `open`), `rating` (null until rated), `ratingCount`, and with the customer's pin `distanceKm` (road), `etaMinutes` and `deliveryFee` (all null without `lat`/`lng`). Example below | ✅ |
 | GET | `/groceries/categories?lat&lng&page&size` | categories of that same catalogue with distinct product counts, e.g. `{"items":[{"category":"Bakery","itemCount":1},{"category":"Dairy","itemCount":2}],"page":0,"size":50,"totalItems":2}` | ✅ |
 | GET | `/groceries?lat&lng&q&category&page&size` | "virtual warehouse": products listed by **open** Kiranas within 2 km, one row per product (name + pack size) at the cheapest price; empty when no Kirana is open nearby | ✅ |
 | GET | `/search?lat&lng&q` | `{restaurants (≤10, name or cuisine), dishes (≤20), groceries (≤20)}`; each dish carries what's needed to add it: `{itemId, restaurantId, restaurantName, name, description, price, veg, available, imageUrl}` (`id` = `itemId`) | ✅ |
 
+Restaurant card:
+```json
+{ "id": "0c5e…", "name": "Spice Hub", "cuisines": ["North Indian", "Biryani"], "rating": 4.3, "distanceMeters": 2400,
+  "etaMinutes": 24, "open": true, "imageUrl": null, "distanceKm": 3.1, "deliveryFee": 25.00 }
+```
 Menu:
 ```json
 GET /api/v1/catalog/restaurants/0c5e…/menu?lat=18.5204&lng=73.8567
 { "restaurantId": "0c5e…", "restaurantName": "Spice Hub", "open": true, "isOpen": true,
-  "distanceKm": 1.4, "etaMinutes": 24, "rating": 4.3, "ratingCount": 18,
+  "distanceKm": 3.1, "etaMinutes": 24, "rating": 4.3, "ratingCount": 18, "deliveryFee": 25.00,
   "categories": [ { "name": "Biryani", "items": [ { "id": "9b3c…", "name": "Veg Biryani", "description": "…", "price": 180.00,
                                                     "veg": true, "available": true, "imageUrl": null } ] } ] }
 ```
@@ -176,16 +194,16 @@ Dish search result:
 One persistent cart per customer: food from **one** restaurant plus any groceries. Prices are always read from the live catalogue.
 | Method | Path | Notes | Status |
 |---|---|---|---|
-| GET | `/` | `{restaurantId, foodItems, groceryItems, deliveryAddressId, bill, nudge}` (empty cart if none) | ✅ |
+| GET | `/` | `{restaurantId, foodItems, groceryItems, deliveryAddressId, bill, nudge, deliveryDistanceKm, freeDeliveryKm}` (empty cart if none). The bill is priced for the cart's address, else the default address; `deliveryDistanceKm` is the road km the fee used (null with no food or no address) | ✅ |
 | POST | `/items` `{itemType FOOD/GROCERY, itemId, restaurantId?, quantity}` | `restaurantId` required for FOOD; food from another restaurant **replaces** the food section; same item again adds to the quantity (max 20); `409 STORE_CLOSED` if the store is closed | ✅ |
 | PATCH | `/items/{cartItemId}` `{quantity}` | 0 removes the line | ✅ |
 | DELETE | `/items/{cartItemId}` | returns the cart | ✅ |
 | DELETE | `/` | 204 | ✅ |
-| PUT | `/address` `{addressId}` | must be yours, within 2 km of the restaurant and of an open Kirana if there are groceries (`400 ADDRESS_NOT_SERVICEABLE`) | ✅ |
+| PUT | `/address` `{addressId}` | must be yours, within 6 km of the restaurant and 2 km of an open Kirana if there are groceries (`400 ADDRESS_NOT_SERVICEABLE`; the message says which part can't come, e.g. "Food from Spice Hub can't be delivered to this address: it's more than 6 km away. Your groceries can." or "Groceries can't be delivered to this address: no grocery store is open within 2 km."). Returns the cart repriced for that address | ✅ |
 | GET | `/nudges` | same object as `cart.nudge`; `message:null` and no meals when it doesn't apply | ✅ |
 
-Bill (`app.ops.*`): `deliveryFee` ₹25, **waived** when the cart has food or groceries reach ₹150 · `convenienceFee` ₹10 flat · `taxes` 5% GST on food only · `discount` 0 for now.
-Nudge: a grocery-only cart under ₹150 gets `{groceryTotal, threshold, message, suggestedMeals}` — the 5 priciest available dishes from open restaurants near the cart's address (or the default address). Each meal carries what's needed to add it:
+Bill: `deliveryFee` by distance (see "Delivery range and fee": free up to 2 km by road, where a grocery-only cart under ₹150 pays ₹25; slabs beyond) · `convenienceFee` ₹10 flat · `taxes` 5% GST on food only · `discount` 0 for now.
+Nudge: a grocery-only cart under ₹150 gets `{groceryTotal, threshold, message, suggestedMeals}` — the 5 priciest available dishes from open restaurants **within 2 km** (`meal-nudge-radius-km`) of the cart's address (or the default address), so adding one keeps delivery free. Each meal carries what's needed to add it:
 ```json
 "nudge": { "groceryTotal": 30.00, "threshold": 150.00, "message": "Add a meal from a restaurant nearby and get free delivery",
            "suggestedMeals": [ { "itemId": "9b3c…", "restaurantId": "0c5e…", "restaurantName": "Spice Hub", "name": "Veg Thali",
@@ -305,7 +323,7 @@ Sign-up also takes `vehicleType` (MOTORCYCLE/SCOOTER/EV_SCOOTER/BICYCLE), `vehic
 Approved, online partners only. Offers reach the nearest free rider (H3 cells + distance around the first pickup); each offer is valid for `app.ops.rider-offer-timeout` (30 s), then goes to the next rider.
 | Method | Path | Notes | Status |
 |---|---|---|---|
-| GET | `/offers` | open offers `{items:[{offerId, orderIds, stops, totalDistanceMeters, estimatedEarnings, expiresAt}], …}` (also pushed as `OFFER`) | ✅ |
+| GET | `/offers` | open offers `{items:[{offerId, orderIds, stops, totalDistanceMeters, estimatedEarnings, expiresAt}], …}` (also pushed as `OFFER`); `estimatedEarnings` includes the distance pay of the planned route | ✅ |
 | POST | `/offers/{id}/accept` | first accept wins; `409 OFFER_NO_LONGER_AVAILABLE` / `409 RIDER_BUSY`. Rider → `ACTIVE`, order → `PICKING`; returns the locked route | ✅ |
 | POST | `/offers/{id}/reject` `{reason?}` | 204; the order goes to the next rider straight away | ✅ |
 | GET | `/route` | `{routeId, locked:true, stops[{stopId, sequence, type, name, address, location, orderIds, items, state, eta}], remainingDistanceMeters, estimatedCompletionAt}`; `404` when no active route | ✅ |
@@ -317,7 +335,7 @@ Approved, online partners only. Offers reach the nearest free rider (H3 cells + 
 | POST | `/orders/{orderId}/deliver` `{deliveryOtp}` | 4-digit code from the customer; `400 DELIVERY_OTP_INVALID`. Completes the order, books earnings, frees the rider when the route is empty. Groceries not picked up by then become `UNFULFILLED` and are refunded (see mixed orders) | ✅ |
 | POST | `/route/injections/{id}/ack` | 204 | ✅ |
 | GET | `/deliveries?page&size` | `{orderId, batched, stops, earnings, completedAt}` | ✅ |
-| GET | `/earnings?period=TODAY/WEEK/MONTH&page&size` | Indian time; base ₹30 per order + ₹10 per extra pickup + batching incentives, `tripCount`, today's `onlineMinutes` and paged `payouts` (example below) | ✅ |
+| GET | `/earnings?period=TODAY/WEEK/MONTH&page&size` | Indian time; base ₹30 per order + ₹10 per extra pickup + batching incentives + `distancePay`, `tripCount`, today's `onlineMinutes` and paged `payouts` (example below) | ✅ |
 | GET | `/earnings/payouts?page&size` | | ✅ |
 
 Pickup sequence at every store: **Arrived → mark missing items (Kirana only, optional) → Scan QR**.
@@ -331,10 +349,11 @@ Earnings (the merchant version has the same style):
 ```json
 GET /api/v1/agent/earnings?period=WEEK
 { "period": "WEEK", "from": "2026-10-05", "to": "2026-10-08", "tripCount": 23, "batchedInjections": 4,
-  "basePay": 690.00, "multiStopBonus": 80.00, "incentives": 60.00, "total": 830.00, "onlineMinutes": 312,
+  "basePay": 690.00, "multiStopBonus": 80.00, "incentives": 60.00, "distancePay": 112.50, "total": 942.50, "onlineMinutes": 312,
   "payouts": { "items": [ { "payoutId": "…", "amount": 1200.00, "status": "PAID", "utr": "UTR123", "paidAt": "…" } ], "page": 0, "size": 20, "totalItems": 1 } }
 ```
 `onlineMinutes` is always for today (Indian time), whatever the period.
+Distance pay: `app.rider.per-km-rate` (₹5) for every km of the order's route (its pickups, then the drop, by road) beyond `app.rider.distance-pay-after-km` (2 km), fractions included, booked at delivery as a `DISTANCE` earning (`agent_earnings.earning_type`) and included in `total`.
 
 Stops must be worked in order (Linear Route Locking): acting on any stop but the current one returns `409 STOP_LOCKED`. One order's stops always run Kirana → Restaurant → Customer. A mixed order is only offered once its groceries are claimed (or given up), so the Kirana stop is there from the start; for an order dispatched before that rule, a late Kirana stop is still inserted before the restaurant.
 
@@ -545,10 +564,10 @@ All of these come from domain events after they commit; nothing is sent from a c
 | Class | What it does | Status |
 |---|---|---|
 | `dispatch/DispatchOrchestrator` | reacts to order events after commit (async): starts the broadcast (combined orders wait `kirana-broadcast-combined-delay`, 2 min), offers food-only orders to the nearest rider at once, orders with groceries once claimed (or, mixed, once the groceries are given up); inserts late Kirana stops; postpones unstarted broadcasts on kitchen delays; cleans up on cancel | ✅ |
-| `dispatch/KiranaBroadcastService` | 5 nearest open Kiranas within 500 m, 60 s to claim, then the next ring (1 km); after the last round the groceries are `UNFULFILLED` (grocery-only orders are cancelled, combined orders refund the groceries' share through `order/UnfulfilledGroceries` and dispatch the food) | ✅ |
+| `dispatch/KiranaBroadcastService` | 5 nearest open Kiranas within 500 m, 60 s to claim, then the next ring (1 km), never farther than 2 km (`kirana-radius-km`) from the customer. Rounds start at the restaurant if it is within 2 km of the customer, else at the customer; after the last round the groceries are `UNFULFILLED` (grocery-only orders are cancelled, combined orders refund the groceries' share through `order/UnfulfilledGroceries` and dispatch the food) | ✅ |
 | `dispatch/DispatchScheduler` | poller on every instance (`app.dispatch.poll-interval-ms`): opens/expands due broadcast rounds, expires offers, retries orders waiting for a rider (same rule as above: a mixed order only once its groceries are claimed or `UNFULFILLED`); each row in its own transaction with `FOR UPDATE SKIP LOCKED` | ✅ |
 | `batching/CoLinearBatchingEngine` | for a claimed grocery-only order: ACTIVE riders near the Kirana (H3), whose remaining route passes within 500 m of both the Kirana and the customer; every insertion that keeps existing stops in order is simulated and the cheapest one adding ≤ 4 min wins. The order becomes `BATCHED`, the rider earns ₹15 and gets the "+1 stop" push. Otherwise normal dispatch. The maths is in the pure `CoLinearBatchingAlgorithm` | ✅ |
 | `routing/RoutingClient` | `HaversineRoutingClient` (straight line × 1.3 at 20 km/h) by default; `OsrmRoutingClient` (`/route` + `/table`) with the `osrm` profile and `OSRM_BASE_URL` | ✅ |
 | `spatial/SpatialIndexService` | H3 cells (resolution 9) and the disk covering a radius | ✅ |
 
-The blueprint constants (2 km radius, 500 m corridor, 4 min, 60 s, ₹150, ₹15) live under `app.ops.*` in `application.properties`.
+The blueprint constants (500 m corridor, 4 min, 60 s, ₹150, ₹15) live under `app.ops.*` in `application.properties`; delivery range and pricing under `app.delivery.*`, rider distance pay under `app.rider.*`.

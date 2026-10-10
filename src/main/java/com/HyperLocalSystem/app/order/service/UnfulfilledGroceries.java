@@ -74,7 +74,7 @@ public class UnfulfilledGroceries {
 
     /** What the groceries added to the bill: their subtotal, plus any delivery fee the food alone wouldn't have paid. */
     BigDecimal groceryShare(UnifiedOrder order) {
-        BigDecimal foodOnlyFee = billCalculator.deliveryFee(order.getFoodSubtotal(), BigDecimal.ZERO);
+        BigDecimal foodOnlyFee = billCalculator.deliveryFee(order.getFoodSubtotal(), BigDecimal.ZERO, order.getDeliveryDistanceMeters());
         BigDecimal feeBack = order.getDeliveryFee().subtract(foodOnlyFee).max(BigDecimal.ZERO);
         return BillCalculator.money(order.getGrocerySubtotal().add(feeBack));
     }

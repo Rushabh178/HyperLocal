@@ -51,6 +51,8 @@ public class SpatialIndexService {
     /**
      * Cells that cover a circle of {@code radiusMeters} around the point: the coarse pre-filter for
      * every nearby search. Callers still apply an exact ST_DWithin on the rows it returns.
+     * TODO(scale): the 6 km restaurant radius is ~2,400 cells at resolution 9; index a coarser parent cell
+     * for wide searches before the merchants table gets big.
      */
     public List<String> cellsWithin(double lat, double lng, int radiusMeters) {
         return disk(cellOf(lat, lng), ringsFor(radiusMeters));

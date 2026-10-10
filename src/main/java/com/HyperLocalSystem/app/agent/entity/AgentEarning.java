@@ -33,6 +33,8 @@ import java.util.UUID;
 public class AgentEarning {
 
     public enum Type {
+        /** Distance pay: app.rider.per-km-rate for each km of the order's route beyond app.rider.distance-pay-after-km. */
+        DISTANCE,
         /** Single base payout per delivered order. */
         BASE,
         /** Extra pickups on the same order (Kirana + restaurant). */

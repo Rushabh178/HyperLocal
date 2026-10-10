@@ -55,19 +55,8 @@ public class OsrmRoutingClient implements RoutingClient {
 
     @Override
     public long[][] durationMatrix(List<GeoPoint> sources, List<GeoPoint> destinations) {
-        List<GeoPoint> all = new ArrayList<>(sources);
-        all.addAll(destinations);
-        String sourceIndexes = indexes(0, sources.size());
-        String destinationIndexes = indexes(sources.size(), all.size());
-        JsonNode body = client.get()
-                .uri("/table/v1/driving/" + coordinates(all) + "?sources=" + sourceIndexes
-                        + "&destinations=" + destinationIndexes + "&annotations=duration")
-                .retrieve().body(JsonNode.class);
-        if (!"Ok".equals(body.path("code").asString())) {
-            throw new IllegalStateException("OSRM table failed: " + body.path("code").asString());
-        }
+        JsonNode durations = table(sources, destinations, "duration").path("durations");
         long[][] seconds = new long[sources.size()][destinations.size()];
-        JsonNode durations = body.path("durations");
         for (int i = 0; i < sources.size(); i++) {
             for (int j = 0; j < destinations.size(); j++) {
                 JsonNode cell = durations.path(i).path(j);
@@ -75,6 +64,35 @@ public class OsrmRoutingClient implements RoutingClient {
             }
         }
         return seconds;
+    }
+
+    @Override
+    public int[][] distanceMatrix(List<GeoPoint> sources, List<GeoPoint> destinations) {
+        JsonNode distances = table(sources, destinations, "distance").path("distances");
+        int[][] meters = new int[sources.size()][destinations.size()];
+        for (int i = 0; i < sources.size(); i++) {
+            for (int j = 0; j < destinations.size(); j++) {
+                JsonNode cell = distances.path(i).path(j);
+                meters[i][j] = cell.isNumber() ? (int) Math.round(cell.asDouble()) : Integer.MAX_VALUE / 1024;
+            }
+        }
+        return meters;
+    }
+
+    /** One OSRM /table call; {@code annotation} is "duration" or "distance". */
+    private JsonNode table(List<GeoPoint> sources, List<GeoPoint> destinations, String annotation) {
+        List<GeoPoint> all = new ArrayList<>(sources);
+        all.addAll(destinations);
+        String sourceIndexes = indexes(0, sources.size());
+        String destinationIndexes = indexes(sources.size(), all.size());
+        JsonNode body = client.get()
+                .uri("/table/v1/driving/" + coordinates(all) + "?sources=" + sourceIndexes
+                        + "&destinations=" + destinationIndexes + "&annotations=" + annotation)
+                .retrieve().body(JsonNode.class);
+        if (!"Ok".equals(body.path("code").asString())) {
+            throw new IllegalStateException("OSRM table failed: " + body.path("code").asString());
+        }
+        return body;
     }
 
     private static String coordinates(List<GeoPoint> points) {

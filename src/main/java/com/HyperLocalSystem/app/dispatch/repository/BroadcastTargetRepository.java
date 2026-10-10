@@ -30,6 +30,7 @@ public interface BroadcastTargetRepository extends JpaRepository<BroadcastTarget
             ) as "distanceMeters"
             """ + MerchantRepository.NEARBY_WHERE + """
               and m.is_open
+              and ST_DWithin(CAST(m.location AS geography), CAST(ST_SetSRID(ST_MakePoint(:dropLng, :dropLat), 4326) AS geography), :dropRadius)
               and m.merchant_id not in (
                   select t.merchant_id from broadcast_targets t
                   join broadcast_offers o on o.offer_id = t.offer_id
@@ -39,5 +40,7 @@ public interface BroadcastTargetRepository extends JpaRepository<BroadcastTarget
             """, nativeQuery = true)
     List<NearbyMerchant> findNextKiranas(@Param("cells") Collection<String> cells, @Param("type") String type,
                                          @Param("lat") double lat, @Param("lng") double lng, @Param("radius") int radius,
+                                         @Param("dropLat") double dropLat, @Param("dropLng") double dropLng,
+                                         @Param("dropRadius") int dropRadius,
                                          @Param("orderId") UUID orderId, @Param("limit") int limit);
 }

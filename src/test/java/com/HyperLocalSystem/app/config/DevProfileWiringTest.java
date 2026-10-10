@@ -25,7 +25,7 @@ import static org.mockito.Mockito.mock;
 class DevProfileWiringTest {
 
     private static final AppProperties PROPERTIES = new AppProperties(null, null, null, null,
-            new AppProperties.Payment("test-webhook-secret", Duration.ofMinutes(10), null), null, null);
+            new AppProperties.Payment("test-webhook-secret", Duration.ofMinutes(10), null), null, null, null, null);
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withUserConfiguration(RequiredIntegrationsConfig.class, FakePaymentGateway.class, LoggingPushSender.class)

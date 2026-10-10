@@ -156,11 +156,24 @@ public class RoutePlanner {
                 offer.getDistanceMeters(), offer.getEstimatedEarnings(), offer.getExpiresAt());
     }
 
-    /** Base pay plus the multi-stop bonus for each pickup after the first. */
+    /** Base pay, the multi-stop bonus for each pickup after the first, and the distance pay of the planned route. */
     public BigDecimal estimatedEarnings(UnifiedOrder order) {
-        int pickups = (order.hasGroceries() ? 1 : 0) + (order.hasFood() ? 1 : 0);
+        List<RouteStop> planned = stopsFor(order, new RiderRoute(null), 1);
+        int pickups = (int) planned.stream().filter(RouteStop::isPickup).count();
         return properties.ops().riderBasePay()
-                .add(properties.ops().riderMultiStopBonus().multiply(BigDecimal.valueOf(Math.max(0, pickups - 1))));
+                .add(properties.ops().riderMultiStopBonus().multiply(BigDecimal.valueOf(Math.max(0, pickups - 1))))
+                .add(distancePay(planned));
+    }
+
+    /**
+     * {@code app.rider.per-km-rate} for every km of the order's route (its pickups, then the drop) beyond
+     * {@code app.rider.distance-pay-after-km}; fractions of a km count, rounded to the paisa.
+     */
+    public BigDecimal distancePay(List<RouteStop> orderStops) {
+        List<GeoPoint> path = orderStops.stream().map(stop -> GeoUtils.fromPoint(stop.getLocation())).toList();
+        double km = path.size() < 2 ? 0 : routingClient.route(path).distanceMeters() / 1000.0;
+        double extraKm = Math.max(0, km - properties.rider().distancePayAfterKm());
+        return properties.rider().perKmRate().multiply(BigDecimal.valueOf(extraKm)).setScale(2, java.math.RoundingMode.HALF_UP);
     }
 
     public Optional<GeoPoint> agentLocation(UUID agentId) {

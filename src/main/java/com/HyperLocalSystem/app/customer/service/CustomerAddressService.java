@@ -10,7 +10,7 @@ import com.HyperLocalSystem.app.customer.dto.CustomerDtos.ServiceabilityResponse
 import com.HyperLocalSystem.app.customer.entity.CustomerAddress;
 import com.HyperLocalSystem.app.customer.repository.CustomerAddressRepository;
 import com.HyperLocalSystem.app.merchant.entity.MerchantType;
-import com.HyperLocalSystem.app.config.AppProperties;
+import com.HyperLocalSystem.app.delivery.DeliveryPricing;
 import com.HyperLocalSystem.app.security.PhoneNumbers;
 import com.HyperLocalSystem.app.spatial.SpatialIndexService;
 import lombok.RequiredArgsConstructor;
@@ -32,7 +32,7 @@ public class CustomerAddressService {
     private final CustomerAddressRepository addresses;
     private final SpatialIndexService spatialIndex;
     private final CatalogService catalogService;
-    private final AppProperties properties;
+    private final DeliveryPricing pricing;
 
     @Transactional(readOnly = true)
     public List<AddressResponse> list(UUID customerId) {
@@ -99,17 +99,19 @@ public class CustomerAddressService {
         }
     }
 
-    /** Is this pin inside the 2 km operating radius of at least one approved restaurant or Kirana? */
+    /** Is this pin within range of at least one approved restaurant (6 km) or Kirana (2 km)? */
     @Transactional(readOnly = true)
     public ServiceabilityResponse checkServiceability(GeoPoint location) {
-        int radius = properties.ops().serviceRadiusMeters();
+        int restaurantRadius = pricing.radiusMeters(MerchantType.RESTAURANT);
+        int kiranaRadius = pricing.radiusMeters(MerchantType.KIRANA);
         int restaurants = (int) catalogService.countNearby(MerchantType.RESTAURANT, location.lat(), location.lng());
         int kiranas = (int) catalogService.countNearby(MerchantType.KIRANA, location.lat(), location.lng());
         boolean serviceable = restaurants + kiranas > 0;
         String message = serviceable
                 ? "We deliver here: %d restaurants and %d stores nearby".formatted(restaurants, kiranas)
                 : "We don't deliver to this location yet";
-        return new ServiceabilityResponse(serviceable, radius, restaurants, kiranas, message);
+        return new ServiceabilityResponse(serviceable, Math.max(restaurantRadius, kiranaRadius), restaurants, kiranas, message,
+                restaurantRadius, kiranaRadius);
     }
 
     private void apply(CustomerAddress address, AddressRequest request) {

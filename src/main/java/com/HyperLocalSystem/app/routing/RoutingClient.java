@@ -16,4 +16,7 @@ public interface RoutingClient {
 
     /** travel-time matrix: result[i][j] = seconds from sources[i] to destinations[j]. */
     long[][] durationMatrix(List<GeoPoint> sources, List<GeoPoint> destinations);
+
+    /** Road-distance matrix: result[i][j] = meters from sources[i] to destinations[j]. */
+    int[][] distanceMatrix(List<GeoPoint> sources, List<GeoPoint> destinations);
 }

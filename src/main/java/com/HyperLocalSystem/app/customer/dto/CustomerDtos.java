@@ -86,9 +86,12 @@ public final class CustomerDtos {
 
     public record ServiceabilityResponse(
             boolean serviceable,
+            /** The widest radius (restaurants'); kept for older apps. */
             int serviceRadiusMeters,
             int nearbyRestaurants,
             int nearbyKiranaStores,
-            String message) {
+            String message,
+            int restaurantRadiusMeters,
+            int kiranaRadiusMeters) {
     }
 }

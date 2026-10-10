@@ -97,12 +97,12 @@ public class CustomerOrderService {
                 return toCheckoutResponse(previous.get());
             }
         }
-        PricedCart cart = cartService.lockAndPrice(customerId);
+        CustomerAddress address = addresses.findByIdAndCustomerIdAndDeletedFalse(request.addressId(), customerId)
+                .orElseThrow(() -> ApiException.notFound("Address"));
+        PricedCart cart = cartService.lockAndPrice(customerId, address);
         if (cart.isEmpty()) {
             throw ApiException.badRequest("CART_EMPTY", "Your cart is empty");
         }
-        CustomerAddress address = addresses.findByIdAndCustomerIdAndDeletedFalse(request.addressId(), customerId)
-                .orElseThrow(() -> ApiException.notFound("Address"));
         cartService.ensureServiceable(cart, address);
         ensureOrderable(cart);
 
@@ -117,6 +117,7 @@ public class CustomerOrderService {
         order.setFoodSubtotal(bill.foodSubtotal());
         order.setGrocerySubtotal(bill.grocerySubtotal());
         order.setDeliveryFee(bill.deliveryFee());
+        order.setDeliveryDistanceMeters(cart.roadKm() == null ? null : (int) Math.round(cart.roadKm() * 1000));
         order.setConvenienceFee(bill.convenienceFee());
         order.setTaxes(bill.taxes());
         order.setDiscount(bill.discount());

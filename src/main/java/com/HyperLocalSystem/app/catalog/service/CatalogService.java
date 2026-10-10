@@ -19,6 +19,7 @@ import com.HyperLocalSystem.app.common.geo.GeoUtils;
 import com.HyperLocalSystem.app.common.model.AccountStatus;
 import com.HyperLocalSystem.app.common.model.TemperatureZone;
 import com.HyperLocalSystem.app.config.AppProperties;
+import com.HyperLocalSystem.app.delivery.DeliveryPricing;
 import com.HyperLocalSystem.app.merchant.entity.ApprovalStatus;
 import com.HyperLocalSystem.app.merchant.entity.Merchant;
 import com.HyperLocalSystem.app.merchant.entity.MerchantType;
@@ -41,7 +42,10 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-/** Public browsing. All discovery is limited to {@code ops.serviceRadiusMeters} (2 km) around the pin. */
+/**
+ * Public browsing around the customer's pin: restaurants within {@code app.delivery.restaurant-radius-km}
+ * (6 km), groceries from Kiranas within {@code kirana-radius-km} (2 km), both straight line.
+ */
 @Service
 @RequiredArgsConstructor
 public class CatalogService {
@@ -53,11 +57,15 @@ public class CatalogService {
     private final SpatialIndexService spatialIndex;
     private final RoutingClient routingClient;
     private final AppProperties properties;
+    private final DeliveryPricing pricing;
 
-    /** Restaurants within 2 km, open ones first, then nearest. Closed ones are listed with {@code open=false}. */
+    /**
+     * Restaurants within 6 km, open ones first, then nearest. Closed ones are listed with {@code open=false}.
+     * Each card has the road distance and the delivery fee ("Free delivery" / "₹25 delivery").
+     */
     @Transactional(readOnly = true)
     public PageResponse<RestaurantSummary> nearbyRestaurants(double lat, double lng, String cuisine, int page, int size) {
-        int radius = properties.ops().serviceRadiusMeters();
+        int radius = pricing.radiusMeters(MerchantType.RESTAURANT);
         Page<NearbyMerchant> rows = merchants.findNearby(spatialIndex.cellsWithin(lat, lng, radius),
                 MerchantType.RESTAURANT.name(), lat, lng, radius, containsPattern(cuisine), null,
                 PageResponse.request(page, size));
@@ -84,21 +92,23 @@ public class CatalogService {
                 .toList();
         Double distanceKm = null;
         Integer etaMinutes = null;
+        BigDecimal deliveryFee = null;
         if (lat != null && lng != null) {
             GeoPoint store = GeoUtils.fromPoint(restaurant.getLocation());
             GeoPoint customer = new GeoPoint(lat, lng);
-            distanceKm = km(GeoUtils.haversineMeters(store, customer));
-            long seconds = routingClient.durationMatrix(List.of(store), List.of(customer))[0][0];
-            etaMinutes = properties.ops().defaultPrepMinutes() + (int) Math.ceil(seconds / 60.0);
+            RoutingClient.Route route = routingClient.route(List.of(store, customer));
+            distanceKm = DeliveryPricing.roadKm(route.distanceMeters());
+            etaMinutes = properties.ops().defaultPrepMinutes() + (int) Math.ceil(route.duration().toSeconds() / 60.0);
+            deliveryFee = pricing.slabFee(distanceKm);
         }
         return new MenuResponse(restaurant.getId(), restaurant.getStoreName(), restaurant.isOpen(), restaurant.isOpen(),
                 distanceKm, etaMinutes, rating(restaurant.getRatingSum(), restaurant.getRatingCount()),
-                restaurant.getRatingCount(), categories);
+                restaurant.getRatingCount(), deliveryFee, categories);
     }
 
     /**
-     * The virtual-warehouse catalogue: products listed by open Kiranas within 2 km, one row per
-     * product. Empty when no Kirana is open nearby.
+     * The virtual-warehouse catalogue: products listed by open Kiranas within {@code kirana-radius-km}
+     * (2 km), one row per product. Empty when no Kirana is open nearby.
      */
     @Transactional(readOnly = true)
     public PageResponse<GroceryItem> groceries(double lat, double lng, String query, String category, int page, int size) {
@@ -128,7 +138,7 @@ public class CatalogService {
         if (query == null || query.isBlank()) {
             throw ApiException.badRequest("QUERY_REQUIRED", "Type something to search");
         }
-        int radius = properties.ops().serviceRadiusMeters();
+        int radius = pricing.radiusMeters(MerchantType.RESTAURANT);
         List<RestaurantSummary> restaurants = toSummaries(merchants.findNearby(spatialIndex.cellsWithin(lat, lng, radius),
                 MerchantType.RESTAURANT.name(), lat, lng, radius, null, containsPattern(query),
                 PageResponse.request(0, SEARCH_LIMIT)).getContent(), new GeoPoint(lat, lng));
@@ -149,15 +159,19 @@ public class CatalogService {
 
     // ----------------------------------------------------------------- shared with cart / addresses
 
-    /** Open, approved stores of a type within the service radius of the point. */
+    /** Open, approved stores of a type within that type's radius of the point (restaurants 6 km, Kiranas 2 km). */
     public List<UUID> openNearby(MerchantType type, double lat, double lng) {
-        int radius = properties.ops().serviceRadiusMeters();
+        return openNearby(type, lat, lng, pricing.radiusMeters(type));
+    }
+
+    /** Open, approved stores of a type within {@code radius} meters (straight line). */
+    public List<UUID> openNearby(MerchantType type, double lat, double lng, int radius) {
         return merchants.findOpenIdsNearby(spatialIndex.cellsWithin(lat, lng, radius), type.name(), lat, lng, radius);
     }
 
-    /** Approved stores of a type (open or not) within the service radius. */
+    /** Approved stores of a type (open or not) within that type's radius. */
     public long countNearby(MerchantType type, double lat, double lng) {
-        int radius = properties.ops().serviceRadiusMeters();
+        int radius = pricing.radiusMeters(type);
         return merchants.countNearby(spatialIndex.cellsWithin(lat, lng, radius), type.name(), lat, lng, radius);
     }
 
@@ -173,14 +187,17 @@ public class CatalogService {
         if (rows.isEmpty()) {
             return List.of();
         }
-        long[][] seconds = routingClient.durationMatrix(
-                rows.stream().map(row -> new GeoPoint(row.getLat(), row.getLng())).toList(), List.of(customer));
+        List<GeoPoint> stores = rows.stream().map(row -> new GeoPoint(row.getLat(), row.getLng())).toList();
+        long[][] seconds = routingClient.durationMatrix(stores, List.of(customer));
+        int[][] meters = routingClient.distanceMatrix(stores, List.of(customer));
         int prepMinutes = properties.ops().defaultPrepMinutes();
         return IntStream.range(0, rows.size()).mapToObj(i -> {
             NearbyMerchant row = rows.get(i);
             int travelMinutes = (int) Math.ceil(seconds[i][0] / 60.0);
+            double roadKm = DeliveryPricing.roadKm(meters[i][0]);
             return new RestaurantSummary(row.getId(), row.getName(), cuisines(row.getCuisines()), rating(row),
-                    (int) Math.round(row.getDistanceMeters()), prepMinutes + travelMinutes, row.getOpen(), row.getImageUrl());
+                    (int) Math.round(row.getDistanceMeters()), prepMinutes + travelMinutes, row.getOpen(), row.getImageUrl(),
+                    roadKm, pricing.slabFee(roadKm));
         }).toList();
     }
 
@@ -197,10 +214,6 @@ public class CatalogService {
                 .divide(BigDecimal.valueOf(count), 1, RoundingMode.HALF_UP).doubleValue();
     }
 
-    /** Meters as kilometres with one decimal, e.g. 1.4. */
-    static double km(double meters) {
-        return BigDecimal.valueOf(meters / 1000).setScale(1, RoundingMode.HALF_UP).doubleValue();
-    }
 
     private static GroceryItem toGroceryItem(GroceryRow row) {
         return new GroceryItem(row.getId(), row.getName(), row.getBrand(), row.getPackSize(), row.getMrp(),

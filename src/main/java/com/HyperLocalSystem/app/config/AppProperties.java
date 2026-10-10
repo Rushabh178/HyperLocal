@@ -7,7 +7,8 @@ import java.time.Duration;
 
 /** Typed view of the {@code app.*} settings in application.properties. */
 @ConfigurationProperties(prefix = "app")
-public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing, Payment payment, Admin admin, Storage storage) {
+public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing, Payment payment, Admin admin, Storage storage,
+                            Delivery delivery, Rider rider) {
 
     public record Jwt(String secret, String issuer, Duration accessTokenTtl, Duration refreshTokenTtl) {
     }
@@ -17,7 +18,6 @@ public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing, Payment 
 
     /** Operational constants from the architecture blueprint. */
     public record Ops(
-            int serviceRadiusMeters,
             int batchingCorridorMeters,
             Duration batchingMaxAddedDelay,
             int kiranaBroadcastRadiusMeters,
@@ -47,6 +47,18 @@ public record AppProperties(Jwt jwt, Otp otp, Ops ops, Routing routing, Payment 
             /** Paid per extra pickup on the same order (Kirana + restaurant = 1 extra). */
             BigDecimal riderMultiStopBonus
     ) {
+    }
+
+    /**
+     * Delivery range and pricing, see {@code delivery.DeliveryPricing}. Radii are straight-line km from the
+     * delivery address; {@code freeDeliveryKm} and {@code feeSlabs} ("2-3:15,3-4:25") are road km.
+     */
+    public record Delivery(double restaurantRadiusKm, double kiranaRadiusKm, double freeDeliveryKm, String feeSlabs,
+                           double mealNudgeRadiusKm) {
+    }
+
+    /** Rider distance pay: {@code perKmRate} for every km of an order's route beyond {@code distancePayAfterKm}. */
+    public record Rider(BigDecimal perKmRate, double distancePayAfterKm) {
     }
 
     /**

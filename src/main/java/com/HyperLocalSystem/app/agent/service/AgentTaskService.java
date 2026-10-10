@@ -308,9 +308,11 @@ public class AgentTaskService {
         BigDecimal base = sum(byType, AgentEarning.Type.BASE);
         BigDecimal multiStop = sum(byType, AgentEarning.Type.MULTI_STOP_BONUS);
         BigDecimal incentives = sum(byType, AgentEarning.Type.BATCH_INCENTIVE);
+        BigDecimal distancePay = sum(byType, AgentEarning.Type.DISTANCE);
         return new EarningsSummary(period, from, today, (int) count(byType, AgentEarning.Type.BASE),
                 (int) count(byType, AgentEarning.Type.BATCH_INCENTIVE), base, multiStop, incentives,
-                base.add(multiStop).add(incentives), onlineMinutesToday(agentId, today), payouts(agentId, page, size));
+                base.add(multiStop).add(incentives).add(distancePay), onlineMinutesToday(agentId, today), payouts(agentId, page, size),
+                distancePay);
     }
 
     /** Minutes online since midnight (Indian time), counting a session that is still open up to now. */
@@ -402,11 +404,16 @@ public class AgentTaskService {
         }
     }
 
-    /** Base pay per order, plus the multi-stop bonus for every pickup after the first. */
+    /** Base pay per order, the multi-stop bonus for every pickup after the first, and distance pay beyond 2 km. */
     private void bookEarnings(UUID agentId, UnifiedOrder order) {
         AppProperties.Ops ops = properties.ops();
-        long pickups = stops.findByOrderIdOrderBySequence(order.getId()).stream()
-                .filter(s -> s.isPickup() && s.getState() == StopState.COMPLETED).count();
+        List<RouteStop> travelled = stops.findByOrderIdOrderBySequence(order.getId()).stream()
+                .filter(s -> s.getState() == StopState.COMPLETED).toList();
+        long pickups = travelled.stream().filter(RouteStop::isPickup).count();
+        BigDecimal distancePay = routePlanner.distancePay(travelled);
+        if (distancePay.signum() > 0 && !earnings.existsByAgentIdAndOrderIdAndType(agentId, order.getId(), AgentEarning.Type.DISTANCE)) {
+            earnings.save(new AgentEarning(agentId, order.getId(), AgentEarning.Type.DISTANCE, distancePay));
+        }
         if (!earnings.existsByAgentIdAndOrderIdAndType(agentId, order.getId(), AgentEarning.Type.BASE)) {
             earnings.save(new AgentEarning(agentId, order.getId(), AgentEarning.Type.BASE, ops.riderBasePay()));
         }

@@ -114,6 +114,8 @@ public final class AgentTaskDtos {
             BigDecimal incentives,
             BigDecimal total,
             long onlineMinutes,
-            PageResponse<PayoutItem> payouts) {
+            PageResponse<PayoutItem> payouts,
+            /** Per-km pay beyond 2 km of route (already in {@code total}). */
+            BigDecimal distancePay) {
     }
 }

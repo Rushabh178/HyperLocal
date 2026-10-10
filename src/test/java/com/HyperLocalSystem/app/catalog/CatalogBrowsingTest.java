@@ -11,11 +11,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CatalogBrowsingTest extends IntegrationTest {
 
     @Test
-    void browseWithinTwoKilometres() throws Exception {
+    void browseWithinRange() throws Exception {
         Session spiceHub = signUpMerchant("RESTAURANT", "Spice Hub", point(300, 0), true);
         Session closed = signUpMerchant("RESTAURANT", "Late Night Diner", point(1000, 0), false);
         jdbc.update("update merchants set approval_status = 'APPROVED' where merchant_id = ?", closed.id());
-        signUpMerchant("RESTAURANT", "Far Away Dhaba", point(3000, 0), true);
+        signUpMerchant("RESTAURANT", "Far Away Dhaba", point(7000, 0), true);
         Session kirana1 = signUpMerchant("KIRANA", "Sharma Kirana", point(0, 500), true);
         Session kirana2 = signUpMerchant("KIRANA", "Gupta Stores", point(0, 800), true);
 
@@ -25,7 +25,7 @@ class CatalogBrowsingTest extends IntegrationTest {
         createItem(kirana1.token(), "Brown Bread", "45.00", "Bakery", "AMBIENT");
         createItem(kirana2.token(), "Toned Milk", "28.00", "Dairy", "COLD");
 
-        // Restaurants: the 3 km one is out of range; open ones come before closed ones.
+        // Restaurants: the 7 km one is out of range (6 km); open ones come before closed ones.
         String restaurants = get("/api/v1/catalog/restaurants?" + latLng(0, 0), null);
         assertThat((Integer) read(restaurants, "$.totalItems")).isEqualTo(2);
         assertThat((String) read(restaurants, "$.items[0].name")).isEqualTo("Spice Hub");

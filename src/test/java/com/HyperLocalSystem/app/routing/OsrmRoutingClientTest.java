@@ -20,7 +20,7 @@ class OsrmRoutingClientTest {
     private final RestClient.Builder builder = RestClient.builder();
     private final MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
     private final OsrmRoutingClient client = new OsrmRoutingClient(builder,
-            new AppProperties(null, null, null, new AppProperties.Routing(1.3, 20, "http://osrm.test"), null, null, null));
+            new AppProperties(null, null, null, new AppProperties.Routing(1.3, 20, "http://osrm.test"), null, null, null, null, null));
 
     private final GeoPoint a = new GeoPoint(18.52, 73.85);
     private final GeoPoint b = new GeoPoint(18.53, 73.86);

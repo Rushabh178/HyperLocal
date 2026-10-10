@@ -122,6 +122,10 @@ public class UnifiedOrder {
     @Column(name = "delivery_fee", precision = 10, scale = 2)
     private BigDecimal deliveryFee;
 
+    /** Road distance of the farthest pickup to the drop at checkout: what the delivery fee was based on. */
+    @Column(name = "delivery_distance_m")
+    private Integer deliveryDistanceMeters;
+
     @Column(name = "convenience_fee", precision = 10, scale = 2)
     private BigDecimal convenienceFee;
 

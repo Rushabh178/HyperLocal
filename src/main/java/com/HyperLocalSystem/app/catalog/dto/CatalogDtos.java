@@ -17,10 +17,15 @@ public final class CatalogDtos {
             List<String> cuisines,
             /** Average stars to one decimal (not money), null until rated. */
             Double rating,
+            /** Straight line from the customer's pin (what decides visibility). */
             int distanceMeters,
             int etaMinutes,
             boolean open,
-            String imageUrl) {
+            String imageUrl,
+            /** Road km from the restaurant to the pin, one decimal: what the delivery fee is based on. */
+            double distanceKm,
+            /** 0.00 = "Free delivery"; otherwise the distance slab. */
+            BigDecimal deliveryFee) {
     }
 
     public record MenuItem(
@@ -38,8 +43,8 @@ public final class CatalogDtos {
 
     /**
      * A restaurant's menu. {@code isOpen} repeats {@code open} under the name the apps use. The
-     * distance and ETA need the customer's pin ({@code ?lat&lng}) and are null without it;
-     * {@code rating} is null until rated.
+     * distance (road km), ETA and delivery fee need the customer's pin ({@code ?lat&lng}) and are null
+     * without it; {@code rating} is null until rated.
      */
     public record MenuResponse(
             UUID restaurantId,
@@ -50,6 +55,7 @@ public final class CatalogDtos {
             Integer etaMinutes,
             Double rating,
             int ratingCount,
+            BigDecimal deliveryFee,
             List<MenuCategory> categories) {
     }
 
