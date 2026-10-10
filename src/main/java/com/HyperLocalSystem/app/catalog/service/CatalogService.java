@@ -1,5 +1,6 @@
 package com.HyperLocalSystem.app.catalog.service;
 
+import com.HyperLocalSystem.app.catalog.dto.CatalogDtos.DishResult;
 import com.HyperLocalSystem.app.catalog.dto.CatalogDtos.GroceryCategory;
 import com.HyperLocalSystem.app.catalog.dto.CatalogDtos.GroceryItem;
 import com.HyperLocalSystem.app.catalog.dto.CatalogDtos.MenuCategory;
@@ -14,6 +15,7 @@ import com.HyperLocalSystem.app.catalog.repository.GroceryRow;
 import com.HyperLocalSystem.app.common.api.PageResponse;
 import com.HyperLocalSystem.app.common.exception.ApiException;
 import com.HyperLocalSystem.app.common.geo.GeoPoint;
+import com.HyperLocalSystem.app.common.geo.GeoUtils;
 import com.HyperLocalSystem.app.common.model.AccountStatus;
 import com.HyperLocalSystem.app.common.model.TemperatureZone;
 import com.HyperLocalSystem.app.config.AppProperties;
@@ -63,9 +65,12 @@ public class CatalogService {
         return new PageResponse<>(summaries, rows.getNumber(), rows.getSize(), rows.getTotalElements());
     }
 
-    /** Full menu grouped by category; unavailable dishes are listed with {@code available=false}. */
+    /**
+     * Full menu grouped by category; unavailable dishes are listed with {@code available=false}.
+     * With the customer's pin ({@code lat}/{@code lng}, both or neither) it also says how far and how long.
+     */
     @Transactional(readOnly = true)
-    public MenuResponse menu(UUID restaurantId) {
+    public MenuResponse menu(UUID restaurantId, Double lat, Double lng) {
         Merchant restaurant = merchants.findById(restaurantId)
                 .filter(m -> m.getType() == MerchantType.RESTAURANT
                         && m.getApprovalStatus() == ApprovalStatus.APPROVED
@@ -77,7 +82,18 @@ public class CatalogService {
         List<MenuCategory> categories = byCategory.entrySet().stream()
                 .map(entry -> new MenuCategory(entry.getKey(), entry.getValue()))
                 .toList();
-        return new MenuResponse(restaurant.getId(), restaurant.getStoreName(), restaurant.isOpen(), categories);
+        Double distanceKm = null;
+        Integer etaMinutes = null;
+        if (lat != null && lng != null) {
+            GeoPoint store = GeoUtils.fromPoint(restaurant.getLocation());
+            GeoPoint customer = new GeoPoint(lat, lng);
+            distanceKm = km(GeoUtils.haversineMeters(store, customer));
+            long seconds = routingClient.durationMatrix(List.of(store), List.of(customer))[0][0];
+            etaMinutes = properties.ops().defaultPrepMinutes() + (int) Math.ceil(seconds / 60.0);
+        }
+        return new MenuResponse(restaurant.getId(), restaurant.getStoreName(), restaurant.isOpen(), restaurant.isOpen(),
+                distanceKm, etaMinutes, rating(restaurant.getRatingSum(), restaurant.getRatingCount()),
+                restaurant.getRatingCount(), categories);
     }
 
     /**
@@ -118,9 +134,14 @@ public class CatalogService {
                 PageResponse.request(0, SEARCH_LIMIT)).getContent(), new GeoPoint(lat, lng));
 
         List<UUID> openRestaurants = openNearby(MerchantType.RESTAURANT, lat, lng);
-        List<MenuItem> dishes = openRestaurants.isEmpty() ? List.of()
+        List<CatalogItem> dishItems = openRestaurants.isEmpty() ? List.of()
                 : items.findTop20ByMerchantIdInAndTypeAndAvailableTrueAndNameContainingIgnoreCase(
-                        openRestaurants, ItemType.FOOD, query.trim()).stream().map(CatalogService::toMenuItem).toList();
+                        openRestaurants, ItemType.FOOD, query.trim());
+        Map<UUID, String> restaurantNames = merchants.findAllById(dishItems.stream().map(CatalogItem::getMerchantId).distinct().toList())
+                .stream().collect(Collectors.toMap(Merchant::getId, Merchant::getStoreName));
+        List<DishResult> dishes = dishItems.stream().map(item -> new DishResult(item.getId(), item.getId(), item.getMerchantId(),
+                restaurantNames.get(item.getMerchantId()), item.getName(), item.getDescription(), item.getPrice(),
+                Boolean.TRUE.equals(item.getVeg()), item.isAvailable(), item.getImageUrl())).toList();
 
         List<GroceryItem> groceries = groceries(lat, lng, query, null, 0, PageResponse.DEFAULT_SIZE).items();
         return new SearchResponse(restaurants, dishes, groceries);
@@ -168,8 +189,17 @@ public class CatalogService {
     }
 
     private static Double rating(NearbyMerchant row) {
-        return row.getRatingCount() == 0 ? null : BigDecimal.valueOf(row.getRatingSum())
-                .divide(BigDecimal.valueOf(row.getRatingCount()), 1, RoundingMode.HALF_UP).doubleValue();
+        return rating(row.getRatingSum(), row.getRatingCount());
+    }
+
+    private static Double rating(long sum, long count) {
+        return count == 0 ? null : BigDecimal.valueOf(sum)
+                .divide(BigDecimal.valueOf(count), 1, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    /** Meters as kilometres with one decimal, e.g. 1.4. */
+    static double km(double meters) {
+        return BigDecimal.valueOf(meters / 1000).setScale(1, RoundingMode.HALF_UP).doubleValue();
     }
 
     private static GroceryItem toGroceryItem(GroceryRow row) {

@@ -152,10 +152,25 @@ Pass the selected address's pin as `lat`/`lng`. Everything is limited to approve
 | Method | Path | Notes | Status |
 |---|---|---|---|
 | GET | `/restaurants?lat&lng&cuisine&page&size` | open restaurants first, then nearest; closed ones have `open:false`; `etaMinutes` = default prep (15) + travel time; `rating` is null until rated | ✅ |
-| GET | `/restaurants/{id}/menu` | grouped by category; sold-out dishes have `available:false` | ✅ |
+| GET | `/restaurants/{id}/menu?lat&lng` | grouped by category; sold-out dishes have `available:false`. Header: `isOpen` (same as `open`), `rating` (null until rated), `ratingCount`, and with the customer's pin `distanceKm` + `etaMinutes` (null without `lat`/`lng`). Example below | ✅ |
 | GET | `/groceries/categories?lat&lng&page&size` | categories of that same catalogue with distinct product counts, e.g. `{"items":[{"category":"Bakery","itemCount":1},{"category":"Dairy","itemCount":2}],"page":0,"size":50,"totalItems":2}` | ✅ |
 | GET | `/groceries?lat&lng&q&category&page&size` | "virtual warehouse": products listed by **open** Kiranas within 2 km, one row per product (name + pack size) at the cheapest price; empty when no Kirana is open nearby | ✅ |
-| GET | `/search?lat&lng&q` | `{restaurants (≤10, name or cuisine), dishes (≤20), groceries (≤20)}` | ✅ |
+| GET | `/search?lat&lng&q` | `{restaurants (≤10, name or cuisine), dishes (≤20), groceries (≤20)}`; each dish carries what's needed to add it: `{itemId, restaurantId, restaurantName, name, description, price, veg, available, imageUrl}` (`id` = `itemId`) | ✅ |
+
+Menu:
+```json
+GET /api/v1/catalog/restaurants/0c5e…/menu?lat=18.5204&lng=73.8567
+{ "restaurantId": "0c5e…", "restaurantName": "Spice Hub", "open": true, "isOpen": true,
+  "distanceKm": 1.4, "etaMinutes": 24, "rating": 4.3, "ratingCount": 18,
+  "categories": [ { "name": "Biryani", "items": [ { "id": "9b3c…", "name": "Veg Biryani", "description": "…", "price": 180.00,
+                                                    "veg": true, "available": true, "imageUrl": null } ] } ] }
+```
+Dish search result:
+```json
+"dishes": [ { "id": "9b3c…", "itemId": "9b3c…", "restaurantId": "0c5e…", "restaurantName": "Spice Hub", "name": "Veg Biryani",
+              "description": "…", "price": 180.00, "veg": true, "available": true, "imageUrl": null } ]
+```
+→ `POST /customer/cart/items {"itemType":"FOOD","itemId":"9b3c…","restaurantId":"0c5e…","quantity":1}`
 
 ### Unified cart: `/customer/cart`
 One persistent cart per customer: food from **one** restaurant plus any groceries. Prices are always read from the live catalogue.
@@ -182,8 +197,8 @@ Nudge: a grocery-only cart under ₹150 gets `{groceryTotal, threshold, message,
 | Method | Path | Notes | Status |
 |---|---|---|---|
 | POST | `/checkout` `{addressId, paymentMethod UPI/WALLET}` + optional `Idempotency-Key` header | → 201 `{orderId, status, payableAmount, upiIntentUrl, payment}` (see "Paying" below). Re-validates and re-prices the cart, freezes it into an order, takes the payment, clears the cart. Same key again returns the first order. Errors: `400 CART_EMPTY`, `400 ADDRESS_NOT_SERVICEABLE`, `409 ITEM_UNAVAILABLE`, `409 STORE_CLOSED`, `409 INSUFFICIENT_WALLET_BALANCE` | ✅ |
-| GET | `/?status&page&size` | newest first | ✅ |
-| GET | `/{id}` | items, `bill` (after refunds), `missingItems`, address, `rider`, `deliveryOtp` (4 digits, shown while the order is active), `cancellable`, `stops` — example below | ✅ |
+| GET | `/?status&page&size` | newest first; `{orderId, status, hasFood, hasGroceries, total, rated, createdAt}` | ✅ |
+| GET | `/{id}` | items, `bill` (after refunds), `missingItems`, address, `rider`, `deliveryOtp` (4 digits, shown while the order is active), `cancellable`, `stops`, `rated` + `rating` — example below | ✅ |
 | GET | `/{id}/timeline` | unified Kirana → Restaurant → Home line | ✅ |
 | GET | `/{id}/tracking` | `{orderId, status, agentLocation, etaMinutes, stops, updatedAt}` snapshot; live updates over WebSocket | ✅ |
 | POST | `/{id}/cancel` `{reason}` | only before pickup (`409 ORDER_NOT_CANCELLABLE` / `ORDER_ALREADY_PICKED_UP`); releases the UPI hold or refunds a wallet payment to the wallet | ✅ |
@@ -200,17 +215,22 @@ Order details:
   "deliveryAddress": { … },
   "rider": { "name": "Ravi", "phone": "+919812345678", "vehicleNumber": "MH12AB1234", "location": { "lat": 18.52, "lng": 73.85 } },
   "deliveryOtp": "4821", "cancellable": true,
-  "stops": [ … ], "createdAt": "…" }
+  "stops": [ … ], "rated": false, "rating": null, "createdAt": "…" }
 ```
 `rider` is null until someone accepts; the phone is the real number for now (masking comes later). `missingItems[]` is `{itemId, name, quantity, refundAmount}`.
+`rated` says whether the customer has rated the order; once rated, `rating` is `{deliveryRating, restaurantRating, kiranaRating, comment, createdAt}` (stars 1-5, null for a part the order didn't have or wasn't rated).
 
 **Stops** (order details, tracking, `ORDER_STATUS` and `STOPS_UPDATED`): the rider's real stops once someone has the order; before that the planned stops with `stopId: null`.
 `status` is `PENDING`, `ARRIVED`, `PICKED_UP` (Kirana / restaurant), `DELIVERED` (customer) or `SKIPPED`.
+Every stop has `lat`, `lng` and `address` (the store's, or the delivery address for `CUSTOMER`), so the map can show all of them. They are null only for a Kirana stop while no shop has claimed the groceries yet ("Finding a store nearby") and for the "Groceries unavailable" stop.
 ```json
 "stops": [
-  { "stopId": "e2d4…", "type": "KIRANA",     "name": "Sharma Kirana", "status": "PICKED_UP", "completedAt": "2026-10-08T13:31:02Z" },
-  { "stopId": "9a01…", "type": "RESTAURANT", "name": "Spice Hub",     "status": "ARRIVED",   "completedAt": null },
-  { "stopId": "77bc…", "type": "CUSTOMER",   "name": "Home",          "status": "PENDING",   "completedAt": null }
+  { "stopId": "e2d4…", "type": "KIRANA",     "name": "Sharma Kirana", "status": "PICKED_UP", "completedAt": "2026-10-08T13:31:02Z",
+    "lat": 18.5219, "lng": 73.8552, "address": "Sharma Kirana, Shivajinagar, Pune" },
+  { "stopId": "9a01…", "type": "RESTAURANT", "name": "Spice Hub",     "status": "ARRIVED",   "completedAt": null,
+    "lat": 18.5248, "lng": 73.8524, "address": "Spice Hub, Shivajinagar, Pune" },
+  { "stopId": "77bc…", "type": "CUSTOMER",   "name": "Home",          "status": "PENDING",   "completedAt": null,
+    "lat": 18.5204, "lng": 73.8567, "address": "Flat 12, Shanti Apartments, FC Road, Shivajinagar, Pune, Maharashtra 411005" }
 ]
 ```
 **Bill**: `{foodSubtotal, grocerySubtotal, deliveryFee, convenienceFee, taxes, discount, total, refunds, netTotal}`. `refunds` is what has already gone back to the customer (missing items, unavailable groceries, cancellation) and `netTotal = total - refunds`; in the cart `refunds` is `0.00` and `netTotal = total`.
@@ -451,7 +471,8 @@ Every message on every queue has the same shape; switch on `type`, read `data`:
 ```json
 { "type": "STOPS_UPDATED", "sentAt": "…",
   "data": { "orderId": "6f1c…", "status": "PICKING",
-            "stops": [ { "stopId": "e2d4…", "type": "KIRANA", "name": "Sharma Kirana", "status": "ARRIVED", "completedAt": null }, … ],
+            "stops": [ { "stopId": "e2d4…", "type": "KIRANA", "name": "Sharma Kirana", "status": "ARRIVED", "completedAt": null,
+                         "lat": 18.5219, "lng": 73.8552, "address": "Sharma Kirana, Shivajinagar, Pune" }, … ],
             "missingItems": [ { "itemId": "41b8…", "name": "Brown Bread", "quantity": 1, "refundAmount": 45.00 } ],
             "bill": { "foodSubtotal": 0.00, "grocerySubtotal": 165.00, "deliveryFee": 0.00, "convenienceFee": 10.00, "taxes": 0.00,
                       "discount": 0.00, "total": 175.00, "refunds": 45.00, "netTotal": 130.00 } } }

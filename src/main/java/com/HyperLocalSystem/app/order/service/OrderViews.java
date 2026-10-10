@@ -2,7 +2,11 @@ package com.HyperLocalSystem.app.order.service;
 
 import com.HyperLocalSystem.app.cart.dto.CartDtos.BillSummary;
 import com.HyperLocalSystem.app.cart.service.BillCalculator;
+import com.HyperLocalSystem.app.common.geo.GeoPoint;
+import com.HyperLocalSystem.app.common.geo.GeoUtils;
 import com.HyperLocalSystem.app.common.model.StopType;
+import com.HyperLocalSystem.app.customer.repository.CustomerAddressRepository;
+import com.HyperLocalSystem.app.customer.service.CustomerAddressService;
 import com.HyperLocalSystem.app.dispatch.entity.RouteStop;
 import com.HyperLocalSystem.app.dispatch.repository.RouteStopRepository;
 import com.HyperLocalSystem.app.merchant.entity.Merchant;
@@ -36,6 +40,7 @@ public class OrderViews {
 
     private final RouteStopRepository stops;
     private final MerchantRepository merchants;
+    private final CustomerAddressRepository addresses;
     private final OrderItemRepository orderItems;
     private final PaymentRepository payments;
 
@@ -50,25 +55,30 @@ public class OrderViews {
             List<TrackingStop> line = new ArrayList<>(routeStops.stream().map(OrderViews::toTrackingStop).toList());
             boolean kiranaOnRoute = routeStops.stream().anyMatch(s -> s.getType() == StopType.KIRANA);
             if (order.getGroceryStatus() == PartStatus.UNFULFILLED && !kiranaOnRoute) {
-                line.addFirst(new TrackingStop(null, StopType.KIRANA, "Groceries unavailable", TrackingStopStatus.SKIPPED, null));
+                line.addFirst(new TrackingStop(null, StopType.KIRANA, "Groceries unavailable", TrackingStopStatus.SKIPPED, null,
+                        null, null, null));
             }
             return line;
         }
         List<TrackingStop> planned = new ArrayList<>();
         if (order.hasGroceries()) {
-            String name = order.getKiranaId() == null ? "Finding a store nearby" : storeName(order.getKiranaId());
-            planned.add(new TrackingStop(null, StopType.KIRANA, name, partStatus(order.getGroceryStatus()), null));
+            planned.add(order.getKiranaId() == null
+                    ? new TrackingStop(null, StopType.KIRANA, "Finding a store nearby", partStatus(order.getGroceryStatus()), null,
+                    null, null, null)
+                    : storeStop(StopType.KIRANA, order.getKiranaId(), partStatus(order.getGroceryStatus())));
         }
         if (order.hasFood()) {
-            planned.add(new TrackingStop(null, StopType.RESTAURANT, storeName(order.getRestaurantId()),
-                    partStatus(order.getFoodStatus()), null));
+            planned.add(storeStop(StopType.RESTAURANT, order.getRestaurantId(), partStatus(order.getFoodStatus())));
         }
         TrackingStopStatus home = switch (order.getStatus()) {
             case COMPLETED -> TrackingStopStatus.DELIVERED;
             case CANCELLED -> TrackingStopStatus.SKIPPED;
             default -> TrackingStopStatus.PENDING;
         };
-        planned.add(new TrackingStop(null, StopType.CUSTOMER, "Home", home, order.getCompletedAt()));
+        GeoPoint drop = GeoUtils.fromPoint(order.getDropLocation());
+        String dropAddress = order.getDeliveryAddressId() == null ? null : addresses.findById(order.getDeliveryAddressId())
+                .map(a -> CustomerAddressService.toResponse(a).fullAddress()).orElse(null);
+        planned.add(new TrackingStop(null, StopType.CUSTOMER, "Home", home, order.getCompletedAt(), drop.lat(), drop.lng(), dropAddress));
         return planned;
     }
 
@@ -105,7 +115,17 @@ public class OrderViews {
             case SKIPPED -> TrackingStopStatus.SKIPPED;
         };
         String name = stop.getType() == StopType.CUSTOMER ? "Home" : stop.getName();
-        return new TrackingStop(stop.getId(), stop.getType(), name, status, stop.getCompletedAt());
+        GeoPoint at = GeoUtils.fromPoint(stop.getLocation());
+        return new TrackingStop(stop.getId(), stop.getType(), name, status, stop.getCompletedAt(), at.lat(), at.lng(), stop.getAddress());
+    }
+
+    private TrackingStop storeStop(StopType type, UUID merchantId, TrackingStopStatus status) {
+        Merchant store = merchants.findById(merchantId).orElse(null);
+        if (store == null) {
+            return new TrackingStop(null, type, "Store", status, null, null, null, null);
+        }
+        GeoPoint at = GeoUtils.fromPoint(store.getLocation());
+        return new TrackingStop(null, type, store.getStoreName(), status, null, at.lat(), at.lng(), store.getAddress());
     }
 
     private static TrackingStopStatus partStatus(PartStatus status) {
@@ -116,7 +136,4 @@ public class OrderViews {
         };
     }
 
-    private String storeName(UUID merchantId) {
-        return merchants.findById(merchantId).map(Merchant::getStoreName).orElse("Store");
-    }
 }

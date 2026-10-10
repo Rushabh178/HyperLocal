@@ -36,7 +36,21 @@ public final class CatalogDtos {
     public record MenuCategory(String name, List<MenuItem> items) {
     }
 
-    public record MenuResponse(UUID restaurantId, String restaurantName, boolean open, List<MenuCategory> categories) {
+    /**
+     * A restaurant's menu. {@code isOpen} repeats {@code open} under the name the apps use. The
+     * distance and ETA need the customer's pin ({@code ?lat&lng}) and are null without it;
+     * {@code rating} is null until rated.
+     */
+    public record MenuResponse(
+            UUID restaurantId,
+            String restaurantName,
+            boolean open,
+            boolean isOpen,
+            Double distanceKm,
+            Integer etaMinutes,
+            Double rating,
+            int ratingCount,
+            List<MenuCategory> categories) {
     }
 
     /**
@@ -59,9 +73,23 @@ public final class CatalogDtos {
     public record GroceryCategory(String category, long itemCount) {
     }
 
+    /** A dish in search results, with the restaurant needed to add it to the cart ({@code id} = {@code itemId}). */
+    public record DishResult(
+            UUID id,
+            UUID itemId,
+            UUID restaurantId,
+            String restaurantName,
+            String name,
+            String description,
+            BigDecimal price,
+            boolean veg,
+            boolean available,
+            String imageUrl) {
+    }
+
     public record SearchResponse(
             List<RestaurantSummary> restaurants,
-            List<MenuItem> dishes,
+            List<DishResult> dishes,
             List<GroceryItem> groceries) {
     }
 }

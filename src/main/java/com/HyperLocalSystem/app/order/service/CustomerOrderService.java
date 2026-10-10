@@ -26,6 +26,7 @@ import com.HyperLocalSystem.app.order.dto.OrderDtos.CancelOrderRequest;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.CheckoutRequest;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.CheckoutResponse;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.OrderDetail;
+import com.HyperLocalSystem.app.order.dto.OrderDtos.OrderRatingResponse;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.OrderSummary;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.RateOrderRequest;
 import com.HyperLocalSystem.app.order.dto.OrderDtos.RiderInfo;
@@ -58,6 +59,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -144,8 +146,10 @@ public class CustomerOrderService {
         var result = status == null
                 ? orders.findByCustomerIdOrderByCreatedAtDesc(customerId, pageable)
                 : orders.findByCustomerIdAndStatusOrderByCreatedAtDesc(customerId, status, pageable);
+        Set<UUID> rated = result.isEmpty() ? Set.of() : ratings.findAllById(result.getContent().stream().map(UnifiedOrder::getId).toList())
+                .stream().map(OrderRating::getOrderId).collect(Collectors.toSet());
         return PageResponse.of(result, o -> new OrderSummary(o.getId(), o.getStatus(), o.hasFood(), o.hasGroceries(),
-                o.getFinancialTotal(), o.getCreatedAt()));
+                o.getFinancialTotal(), rated.contains(o.getId()), o.getCreatedAt()));
     }
 
     @Transactional(readOnly = true)
@@ -290,11 +294,13 @@ public class CustomerOrderService {
         RiderInfo rider = order.getDeliveryAgentId() == null ? null
                 : agents.findById(order.getDeliveryAgentId()).map(CustomerOrderService::toRiderInfo).orElse(null);
         boolean otpVisible = OrderStatus.ACTIVE.contains(order.getStatus());
+        OrderRatingResponse rating = ratings.findById(order.getId()).map(r -> new OrderRatingResponse(r.getDeliveryRating(),
+                r.getRestaurantRating(), r.getKiranaRating(), r.getComment(), r.getCreatedAt())).orElse(null);
         return new OrderDetail(order.getId(), order.getStatus(),
                 lines.stream().filter(l -> l.getType() == ItemType.FOOD).map(CustomerOrderService::toLine).toList(),
                 lines.stream().filter(l -> l.getType() == ItemType.GROCERY).map(CustomerOrderService::toLine).toList(),
                 bill, orderViews.missingItems(order), address, rider, otpVisible ? order.getDeliveryOtp() : null,
-                isCancellable(order), orderViews.stops(order), order.getCreatedAt());
+                isCancellable(order), orderViews.stops(order), rating != null, rating, order.getCreatedAt());
     }
 
     static CartItemResponse toLine(OrderItem item) {

@@ -52,7 +52,13 @@ public final class OrderDtos {
             boolean hasFood,
             boolean hasGroceries,
             BigDecimal total,
+            boolean rated,
             Instant createdAt) {
+    }
+
+    /** The customer's rating of an order (stars 1-5; a part the order didn't have is null). */
+    public record OrderRatingResponse(Integer deliveryRating, Integer restaurantRating, Integer kiranaRating, String comment,
+                                      Instant createdAt) {
     }
 
     /** The rider carrying the order. {@code phone} is the full number for now. */
@@ -71,14 +77,20 @@ public final class OrderDtos {
             String deliveryOtp,
             boolean cancellable,
             List<TrackingStop> stops,
+            boolean rated,
+            OrderRatingResponse rating,
             Instant createdAt) {
     }
 
     /** How a stop looks to the customer. */
     public enum TrackingStopStatus { PENDING, ARRIVED, PICKED_UP, SKIPPED, DELIVERED }
 
-    /** {@code stopId} is null until a rider has the order (the stops are only planned then). */
-    public record TrackingStop(UUID stopId, StopType type, String name, TrackingStopStatus status, Instant completedAt) {
+    /**
+     * {@code stopId} is null until a rider has the order (the stops are only planned then). {@code lat}/{@code lng}/
+     * {@code address} are null only while no Kirana has claimed the groceries yet.
+     */
+    public record TrackingStop(UUID stopId, StopType type, String name, TrackingStopStatus status, Instant completedAt,
+                               Double lat, Double lng, String address) {
     }
 
     /** An item the store didn't have; {@code refundAmount} goes back to the customer's wallet. */

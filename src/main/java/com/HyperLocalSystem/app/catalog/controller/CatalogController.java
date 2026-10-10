@@ -33,8 +33,9 @@ public class CatalogController {
     }
 
     @GetMapping("/restaurants/{restaurantId}/menu")
-    public MenuResponse menu(@PathVariable UUID restaurantId) {
-        return catalogService.menu(restaurantId);
+    public MenuResponse menu(@PathVariable UUID restaurantId, @RequestParam(required = false) Double lat,
+                             @RequestParam(required = false) Double lng) {
+        return catalogService.menu(restaurantId, lat, lng);
     }
 
     @GetMapping("/groceries")
