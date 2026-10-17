@@ -1,0 +1,43 @@
+# Test server: the API plus PostgreSQL/PostGIS on one machine.
+# Run from this directory:  docker compose up -d --build
+# Both containers restart on their own whenever the server boots.
+
+services:
+  db:
+    image: postgis/postgis:18-3.6
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hyper_local
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in deploy/.env}
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d hyper_local"]
+      interval: 5s
+      retries: 20
+    # No ports: the database is reachable only from the app container.
+
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/hyper_local
+      DB_USERNAME: postgres
+      STORAGE_DIR: /app/uploads
+      # Leaves room for Postgres on a 2 GB machine.
+      JAVA_TOOL_OPTIONS: -Xms256m -Xmx768m
+    volumes:
+      - uploads:/app/uploads
+    ports:
+      - "80:8080"
+
+volumes:
+  pgdata:
+  uploads:
